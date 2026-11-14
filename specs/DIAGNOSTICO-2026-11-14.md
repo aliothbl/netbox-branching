@@ -12,7 +12,7 @@ O pior risco é a perda silenciosa de dados quando o Diode escreve num branch du
 
 | ID | Sev. | Área | Resumo | Evidência | Status |
 |---|---|---|---|---|---|
-| F1 | alta | concorrência | Mudanças de status sem compare-and-set: dois jobs podem rodar ao mesmo tempo no mesmo branch | `models/branches.py:933,957,1139,1156,1180`; `api/views.py:70-80,98-108` | verificado (código) |
+| F1 | alta | concorrência | Mudanças de status sem compare-and-set: dois jobs podem rodar ao mesmo tempo no mesmo branch | `models/branches.py:933,957,1139,1156,1180`; `api/views.py:70-80,98-108` | **reproduzido 9/9** (merges concorrentes; SPEC-1736). Dano permanente previsto não observado; observado: READY transitório de ~3 s com dados já no main e 2 eventos MERGED |
 | F2 | **crítica** | concorrência/dados | Escritas no branch que estão em andamento quando o merge começa nunca são mergeadas, e o branch fica MERGED | `models/branches.py:1148,1156`; `utilities.py:609-613` | **reproduzido 6/6** (SPEC-1736, 2026-11-14: 41–76 objetos perdidos por merge) |
 | F3 | alta | sync | A marca d'água por `time` perde mudanças do main ainda não commitadas | `models/branches.py:946,949,397,1029`; NetBox `core/models/change_logging.py` (`time` com `auto_now_add`) | verificado (lógica) |
 | F4 | média | conflitos | O `ChangeDiff.current` só é atualizado para branches READY, e o merge não exige sync | `signal_receivers.py:134-135`; `api/views.py:36-55` | verificado |
