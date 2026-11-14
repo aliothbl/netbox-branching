@@ -1,13 +1,13 @@
 # Journal — SPEC-20261114-1736-benchmark-reproducao-branching
 
 ## SNAPSHOT
-- **Fase:** 1 — cenário `branch-merge-race` (F2) implementado; primeira execução em andamento.
+- **Fase:** 1 concluída: F2 reproduzido 6/6. Próximo: F1 (`branch-double-merge`) e F7 (`router-overhead`).
 - **Código do harness:** `aliothbl/diode` branch `perf/bench-vs-upstream`, `bench/`:
   - `compose.branching.yaml`: monta `BRANCHING_SRC/netbox_branching` sobre o pacote pip 1.2.0 da imagem;
   - `branch_scenarios.py`: driver dos cenários;
   - `run.sh`: cenários `branch-*`; seed por `plugin-rev + nbb-rev`.
 - **Versão sob teste:** fork `aliothbl/netbox-branching` (main + specs; código = upstream `bb2f951`, ≈ v1.2.3+).
-- **Próximo passo:** validar a primeira execução, depois ≥5 execuções para taxa de reprodução; em seguida F1 (`branch-double-merge`) e F7 (`router-overhead`).
+- **Próximo passo:** cenário `branch-double-merge` (F1), depois `router-overhead` (F7/F8/F9) e `branch-sync-ingest` (F6).
 
 ## Decisões
 - **DEC-1 — Merge e provisionamento síncronos via `nbshell`**, em vez de RQ. `MergeBranchJob.run` só tira um snapshot de resumo e chama `Branch.merge()` (`jobs.py:199-219`). `BranchJobRunner.branch_status` é só metadado e não muda o status no enqueue (`jobs.py:66-91`). A chamada direta reproduz a mesma janela, sem depender de worker.
@@ -16,6 +16,7 @@
 
 ## LOG
 - 2026-11-14 18:17 — SPEC ativada no branch `spec/20261114-1736-benchmark-reproducao`.
+- 2026-11-14 19:35 — **F2: taxa de reprodução 6/6** (validação + 5 execuções; diode `6dbe897`, netbox-branching `631943c` = código upstream `bb2f951`; 60 devices / 540 entidades; `CONCURRENCY=4`). Merge disparado com 240–300/540 assentados. O merge leu 495–527 dos 569 ObjectChanges que o branch acabou tendo. Perdidos por merge (objetos só no schema do branch): devices 4–7, interfaces 18–33, IPs 19–34 (**41–76 objetos**). Branch sempre MERGED sem erro; o Diode registrou 0–1 FAILED. Resultados: `aliothbl/diode:bench/results/20261114-185707-*` e `20261114-191036-*`. F2 marcado como reproduzido no DIAGNOSTICO.
 - 2026-11-14 19:01 — **F2 reproduzido (1ª execução válida).** Merge disparado com 240/540 assentados. O merge leu 500 ObjectChanges; o branch terminou com 569. **69 mudanças (5 devices, 31 interfaces, 33 IPs) ficaram só no schema do branch.** Branch marcado MERGED sem erro; o Diode registrou essas entidades como APPLIED (0 FAILED). Perda silenciosa nos dois lados. Antes disso, três falhas do *harness* (não do plugin), corrigidas:
   - (a) o parser não aceitava o prefixo `>>> ` do console;
   - (b) no console interativo, um `try/except` sem linha em branco não executa, e o "merge de 6 ms" era isso. Agora o script vai num único `exec(...)`;
