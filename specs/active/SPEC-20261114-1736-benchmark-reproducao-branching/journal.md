@@ -16,4 +16,10 @@
 
 ## LOG
 - 2026-11-14 18:17 — SPEC ativada no branch `spec/20261114-1736-benchmark-reproducao`.
+- 2026-11-14 19:01 — **F2 reproduzido (1ª execução válida).** Merge disparado com 240/540 assentados. O merge leu 500 ObjectChanges; o branch terminou com 569. **69 mudanças (5 devices, 31 interfaces, 33 IPs) ficaram só no schema do branch.** Branch marcado MERGED sem erro; o Diode registrou essas entidades como APPLIED (0 FAILED). Perda silenciosa nos dois lados. Antes disso, três falhas do *harness* (não do plugin), corrigidas:
+  - (a) o parser não aceitava o prefixo `>>> ` do console;
+  - (b) no console interativo, um `try/except` sem linha em branco não executa, e o "merge de 6 ms" era isso. Agora o script vai num único `exec(...)`;
+  - (c) o boot do `nbshell` (vários segundos) atrasava o merge para depois da carga. Agora o shell sobe antes e espera o gatilho `/tmp/bench-merge-go`.
+
+  Rodando 5 execuções para a taxa de reprodução.
 - 2026-11-14 18:25 — Cenário `branch-merge-race` implementado (60 devices, 540 entidades; merge disparado com 40% assentado; `CONCURRENCY=4`). Primeira execução com `--keep` iniciada.
