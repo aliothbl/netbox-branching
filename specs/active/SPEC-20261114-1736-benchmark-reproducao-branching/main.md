@@ -1,16 +1,16 @@
 # SPEC-20261114-1736: Reprodução e benchmark do netbox-branching (harness do Diode)
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:36
-**Ativada:** —
+**Ativada:** 2026-11-14 18:17
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** benchmark, reprodução, py-spy, pg_stat_statements, merge-concorrente, router, diode-bench, harness
 **Features:** ci-tests, routing, sync-merge-revert
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1736-benchmark-reproducao` (netbox-branching, docs) + `perf/bench-vs-upstream` (aliothbl/diode, código do harness)
 **Programa:** —
 **Relacionadas:** `aliothbl/diode:bench/` (harness reutilizado); `aliothbl/diode:specs/active/SPEC-20261114-0807-benchmark-performance-vs-upstream` (origem do método)
 **Origem:** `specs/DIAGNOSTICO-2026-11-14.md`, seção "Como medir".
