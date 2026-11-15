@@ -1,16 +1,16 @@
 # SPEC-20261114-1741: Códigos HTTP corretos para branch indisponível
 
-**Status:** draft
+**Status:** active
 **Porte:** P
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:41
-**Ativada:** —
+**Ativada:** 2026-11-15 12:16
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** http-400, 503, Retry-After, 409, 410, BranchNotReady, X-NetBox-Branch, diode, reconciler, branch-padrão
 **Features:** routing, integration-diode
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1741-http-branch-indisponivel`
 **Programa:** `aliothbl/diode:specs/programs/diode-stack-hardening.md`
 **Relacionadas:**
   - `aliothbl/diode:specs/future/SPEC-20261114-1748-retry-branch-indisponivel` (**par obrigatório**: o reconciler consome estes códigos)
