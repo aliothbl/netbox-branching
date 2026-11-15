@@ -72,7 +72,16 @@ http://netbox:8000/api/dcim/sites/
 
 The branch is effectively "deactivated" for future API requests by simply omitting the header.
 
-A request naming a branch which is not yet ready for use — one still provisioning, for example — is rejected with an HTTP 400 response reading `Selected branch is not ready.` The response deliberately does not name the branch or report its status, as it is returned ahead of REST API authentication. Check the branch's `status` via its own REST API representation, and wait for it to reach `ready` before making requests against it.
+A request naming a branch which is not ready for use is refused, and the status code tells the client whether to wait or to give up:
+
+| Branch status | Response |
+|---|---|
+| `new`, `provisioning`, `syncing`, `migrating`, `merging`, `reverting` | `503 Service Unavailable` with a `Retry-After` header (seconds, the `unavailable_retry_after` setting, default 5): the branch will become usable again without anyone acting on it. |
+| `merged`, `archived`, `failed`, `pending-migrations` | `409 Conflict`: the branch will not become usable on its own. |
+
+The body is JSON: `{"detail": "Selected branch is not ready.", "retryable": true|false}`. It deliberately does not name the branch or report its status, as it is returned ahead of REST API authentication. Check the branch's `status` via its own REST API representation if needed. A header naming a branch which does not exist is rejected with an HTTP 400 response.
+
+An automated client — an ingestion pipeline writing into a branch, for example — should treat a 503 as "wait `Retry-After` seconds and send the same request again": nothing was processed. Before netbox-branching answered 503 here, such a client received a 400 for the whole duration of a sync or merge and could only record the request as failed.
 
 !!! note
     The `X-NetBox-Branch` header is required only when making changes to NetBox objects within the context of an active branch. It is **not** required when creating, modifying, or deleting a branch itself.

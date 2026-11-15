@@ -55,6 +55,9 @@ class AppConfig(PluginConfig):
         # Seconds added to `job_timeout` before a job which still reports itself as running is
         # presumed dead. Allows for clock skew and for a worker shutting down gracefully.
         'stuck_job_grace_period': 300,
+        # Seconds sent in the Retry-After header of the 503 response an API request receives
+        # while the branch it selects is in a transitional status (e.g. syncing or merging).
+        'unavailable_retry_after': 5,
     }
 
     def ready(self):
@@ -98,6 +101,10 @@ class AppConfig(PluginConfig):
         grace_period = get_plugin_config('netbox_branching', 'stuck_job_grace_period')
         if type(grace_period) is not int or grace_period < 0:
             raise ImproperlyConfigured("netbox_branching: 'stuck_job_grace_period' must be a non-negative integer.")
+
+        retry_after = get_plugin_config('netbox_branching', 'unavailable_retry_after')
+        if type(retry_after) is not int or retry_after < 1:
+            raise ImproperlyConfigured("netbox_branching: 'unavailable_retry_after' must be a positive integer.")
 
         # Register cleanup handler for branch connections (#358)
         # This ensures branch connections are closed when they exceed CONN_MAX_AGE,

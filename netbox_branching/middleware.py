@@ -1,13 +1,40 @@
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import HttpResponseBadRequest, HttpResponseRedirect
+from django.http import HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.utils.translation import gettext as _
 
+from netbox.plugins import get_plugin_config
+
+from .choices import BranchStatusChoices
 from .constants import COOKIE_NAME, EXEMPT_PATHS, QUERY_PARAM
 from .utilities import BranchNotReady, get_active_branch, is_api_request
 
 __all__ = ('BranchMiddleware',)
+
+# A branch in one of these statuses becomes usable again without anyone acting on it: NEW is
+# waiting for its provisioning job, the rest are running a job. Any other status that is not
+# READY (merged, archived, failed, pending-migrations) needs an operator, or is final.
+RETRYABLE_STATUSES = (BranchStatusChoices.NEW, *BranchStatusChoices.TRANSITIONAL)
+
+
+def branch_not_ready_response(status):
+    """
+    The response to an API request which selects a branch that is not ready.
+
+    A client such as an ingestion pipeline needs to know whether to wait or to give up, so a
+    transitional status answers 503 with Retry-After and any other status 409. Like the 400 it
+    replaces, the body is a static message: this runs ahead of REST API authentication, so the
+    branch's name and status are not reported (see #672).
+    """
+    retryable = status in RETRYABLE_STATUSES
+    response = JsonResponse(
+        {'detail': _('Selected branch is not ready.'), 'retryable': retryable},
+        status=503 if retryable else 409,
+    )
+    if retryable:
+        response['Retry-After'] = str(get_plugin_config('netbox_branching', 'unavailable_retry_after'))
+    return response
 
 
 class BranchMiddleware:
@@ -52,7 +79,9 @@ class BranchMiddleware:
             branch = get_active_branch(request)
         except ObjectDoesNotExist:
             return HttpResponseBadRequest('Invalid branch identifier')
-        except BranchNotReady:
+        except BranchNotReady as e:
+            if is_api_request(request):
+                return branch_not_ready_response(e.status)
             return HttpResponseBadRequest(_('Selected branch is not ready.'))
         request.active_branch = branch
 
