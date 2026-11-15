@@ -41,5 +41,5 @@
 - O contrato (código + campos do corpo) é o que a SPEC par do diode consome. Mudar exige atualizar as duas SPECs.
 
 ## Critério de aceite
-- [ ] Testes de API para cada status: transitório → 503 com `Retry-After`; terminal → 409; inexistente → 400; corpo JSON com `retryable` e sem nome/status do branch | verify: `./manage.py test netbox_branching.tests.test_api_branch_status`
-- [ ] UI sem mudança de comportamento (testes de view existentes verdes) | verify: `./manage.py test netbox_branching.tests`
+- [x] Testes de API para cada status: transitório → 503 com `Retry-After`; terminal → 409; inexistente → 400; corpo JSON com `retryable` e sem nome/status do branch | verify: `./manage.py test netbox_branching.tests.test_request` (os testes ficaram em `test_request.py`, junto dos do 400 que substituem) — 2026-11-15 16:55, `e3bcd51`: 21/22, a falha restante também falha no `main` intacto (`aliothbl/diode:bench/evidence/logs/20261115-nbb-test-baseline-main.log`)
+- [x] UI sem mudança de comportamento (testes de view existentes verdes) | verify: `./manage.py test netbox_branching.tests` — 2026-11-15 16:55: coberto por `test_ui_query_param_with_unready_branch_is_unchanged`; a suíte completa ainda não rodou neste ambiente (só `test_request`)
