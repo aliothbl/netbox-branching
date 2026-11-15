@@ -15,6 +15,14 @@
 - **DEC-3 — O pacote do fork é montado sobre `site-packages`.** O `sys.path[0]` vazio poderia favorecer `/opt/netbox/netbox`, mas não é garantido sob o granian.
 
 ## LOG
+- 2026-11-15 10:14 — **F6 (`branch-sync-ingest`): reproduzido 5/5.** O Diode ingere no branch padrão (60 devices / 540 entidades, `CONCURRENCY=4`, lote 25). O main tem 2000 mudanças com change logging (tags) e o sync é disparado com ~30% da carga assentada (shell pré-aquecido, gatilho `/tmp/bench-sync-go`). Resultados (diode `030b22c`, plugin `ae04547`, netbox-branching `5810e84`):
+  - sync de 36,8–38,5 s; as 2000 mudanças chegam ao branch e ele volta para READY;
+  - **190–265 entidades FAILED** com `400 Selected branch is not ready.` (35–49% da carga), e o Diode não tenta de novo;
+  - objetos que nunca chegam ao branch: devices 21–29, interfaces 84–118, IPs 85–118;
+  - em 2 das 5 execuções, 1–2 lotes também estouraram o timeout de apply de 120 s (P-10 do diode, em investigação).
+  - Duas execuções de teste antes: (a) com lote 100, o sync caiu dentro de um único request em voo (que passou pelo middleware ainda READY), então 0 FAILED, sem valor como evidência; (b) com lote 25, F6 visível, mas **190 entidades ficaram presas em APPLYING com 0 FAILED**, porque o Diode upstream não conseguia gravar o erro de um corpo não-JSON (P-11, corrigido no fork do diode, `9e453e1`).
+  - Resultados: `aliothbl/diode:bench/results/20261115-094726-*`, com logs completos dos containers em `*.logs/`.
+  - Correção proposta (mais barata): o middleware responde **503 + `Retry-After`** para estados transitórios (syncing, merging, migrating, pending-migrations) e 409/410 para os terminais. O cliente de apply do Diode já faz retry em 503 (M-1 do fork).
 - 2026-11-14 18:17 — SPEC ativada no branch `spec/20261114-1736-benchmark-reproducao`.
 - 2026-11-14 21:20 — **F7/F8/F9 (`router-overhead`, A/B ponta a ponta): inconclusivo.** `std`, `CONCURRENCY=4`, ×3 cada. Com netbox-branching (fork): criação 17.8 ± 1.9 ent/s, atualização 17.6. Sem netbox-branching (`compose.nobranching.yaml`): criação 19.0 ± 1.4, atualização 18.3. A diferença média (~7%) fica dentro do ruído, que nesta rodada foi ~10× maior que no lote anterior da mesma configuração (20.08 ± 0.17). Conclusão: o A/B ponta a ponta não tem resolução para um custo de alguns por cento. Próximo: medir direto o tempo de `BranchAwareRouter._get_db`/`supports_branching` (py-spy ou microbenchmark por query) em vez de throughput. Achado colateral **do lado do Diode** (P-9, deadlock no Postgres do reconciler), registrado na SPEC-0807 do aliothbl/diode; não é do netbox-branching.
 - 2026-11-14 20:27 — **F1 (`branch-double-merge`): concorrência reproduzida 9/9; dano permanente não observado.** Dois shells de merge liberados juntos sobre o mesmo branch READY (20 devices).
