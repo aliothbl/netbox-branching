@@ -8,9 +8,19 @@ from netbox.plugins import get_plugin_config
 
 from .choices import BranchStatusChoices
 from .constants import COOKIE_NAME, EXEMPT_PATHS, QUERY_PARAM
-from .utilities import BranchNotReady, get_active_branch, is_api_request
+from .models import Branch
+from .utilities import (
+    BranchNotReady,
+    acquire_branch_write_lock,
+    get_active_branch,
+    is_api_request,
+    release_branch_write_lock,
+)
 
 __all__ = ('BranchMiddleware',)
+
+# Methods that do not write: they neither take nor wait for the branch write lock.
+SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS', 'TRACE')
 
 # A branch in one of these statuses becomes usable again without anyone acting on it: NEW is
 # waiting for its provisioning job, the rest are running a job. Any other status that is not
@@ -85,6 +95,13 @@ class BranchMiddleware:
                 samesite=settings.SESSION_COOKIE_SAMESITE,
             )
 
+    @staticmethod
+    def _refuse_unready(request, status):
+        discard_request_body(request)
+        if is_api_request(request):
+            return branch_not_ready_response(status)
+        return HttpResponseBadRequest(_('Selected branch is not ready.'))
+
     def __call__(self, request):
 
         # Skip branch activation for exempt paths
@@ -98,13 +115,29 @@ class BranchMiddleware:
             discard_request_body(request)
             return HttpResponseBadRequest('Invalid branch identifier')
         except BranchNotReady as e:
-            discard_request_body(request)
-            if is_api_request(request):
-                return branch_not_ready_response(e.status)
-            return HttpResponseBadRequest(_('Selected branch is not ready.'))
+            return self._refuse_unready(request, e.status)
+
+        # A write to a branch holds the branch's shared write lock until the response is built, so a
+        # merge or sync that starts meanwhile waits for it before reading the branch's changes (F2).
+        write_locked = False
+        if branch is not None and request.method not in SAFE_METHODS:
+            if not acquire_branch_write_lock(branch):
+                # An operation holds the lock exclusively: it is already reading the changes.
+                return self._refuse_unready(request, BranchStatusChoices.MERGING)
+            write_locked = True
+            # The status read by get_active_branch() may predate an operation that switched it and
+            # is now waiting for this lock: re-read it under the lock.
+            status = Branch.objects.filter(pk=branch.pk).values_list('status', flat=True).first()
+            if status != BranchStatusChoices.READY:
+                release_branch_write_lock(branch)
+                return self._refuse_unready(request, status)
         request.active_branch = branch
 
-        response = self.get_response(request)
+        try:
+            response = self.get_response(request)
+        finally:
+            if write_locked:
+                release_branch_write_lock(branch)
 
         # Set/clear the branch cookie (for non-API requests)
         if not is_api_request(request):

@@ -321,6 +321,27 @@ PLUGINS_CONFIG = {
 
 ---
 
+## `write_drain_timeout`
+
+Default: `300` (5 minutes)
+
+The number of seconds a merge or sync waits, after switching the branch's status, for write requests
+already running against the branch to finish before it reads the branch's changes. Every write request
+(POST, PUT, PATCH, DELETE) to a branch holds the branch's write lock until its response is built, and
+new write requests are refused (`503`) once the operation has started, so nothing written to the branch
+is left out of the merge. If the running requests have not finished when the timeout expires, the
+operation fails and the branch returns to `ready`. Must be a positive integer.
+
+```python
+PLUGINS_CONFIG = {
+    'netbox_branching': {
+        'write_drain_timeout': 600,
+    }
+}
+```
+
+---
+
 ## NetBox Settings
 
 The settings below are not part of the plugin's own `PLUGINS_CONFIG` block, but interact with the plugin and may need to be updated in `configuration.py`.

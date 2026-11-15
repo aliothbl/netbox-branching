@@ -52,10 +52,13 @@ __all__ = (
     'ActiveBranchContextManager',
     'BranchActionIndicator',
     'BranchNotReady',
+    'BranchWriteLockTimeout',
     'ChangeSummary',
     'DynamicSchemaDict',
     'ListHandler',
+    'acquire_branch_write_lock',
     'activate_branch',
+    'branch_exclusive_lock',
     'clear_mptt_fields',
     'close_old_branch_connections',
     'deactivate_branch',
@@ -70,6 +73,7 @@ __all__ = (
     'record_applied_change',
     'register_branching_resolver',
     'register_objectchange_field_migrator',
+    'release_branch_write_lock',
     'resolve_changes_summary',
     'strip_schema_local_references',
     'supports_branching',
@@ -805,3 +809,65 @@ def is_job_abandoned(job, grace_period=0):
     job_timeout = get_plugin_config('netbox_branching', 'job_timeout') or 0
     deadline = (job.started or job.created) + datetime.timedelta(seconds=job_timeout + (grace_period or 0))
     return timezone.now() > deadline
+
+
+#
+# Branch write lock (F2)
+#
+# Every write request against a branch holds a shared PostgreSQL advisory lock on the branch for its
+# whole duration; merge and sync take it exclusively after switching the branch's status and before
+# reading the change log. The status switch makes new write requests refuse themselves, and the
+# exclusive lock waits for the ones already running, so none of their changes is written after the
+# change log was read (where it would never be merged, and would be dropped with the schema when the
+# branch is archived). Session-level locks on the default connection: a write request may span several
+# transactions on several connections.
+
+# First key of the two-key advisory lock form; the second is the branch's primary key.
+BRANCH_WRITE_LOCK_NAMESPACE = 0x4E425752  # 'NBWR'
+
+
+class BranchWriteLockTimeout(Exception):
+    """Raised when a branch operation gives up waiting for in-flight writes to finish."""
+
+
+def acquire_branch_write_lock(branch):
+    """
+    Try to take the shared write lock on the branch without waiting. Returns False when an operation
+    (merge, sync) holds the lock exclusively, i.e. it has started reading the branch's changes.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_try_advisory_lock_shared(%s, %s)', [BRANCH_WRITE_LOCK_NAMESPACE, branch.pk])
+        return cursor.fetchone()[0]
+
+
+def release_branch_write_lock(branch):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_unlock_shared(%s, %s)', [BRANCH_WRITE_LOCK_NAMESPACE, branch.pk])
+
+
+@contextmanager
+def branch_exclusive_lock(branch, timeout):
+    """
+    Hold the branch's write lock exclusively: wait (up to `timeout` seconds) for every write request
+    holding it to finish, then keep new ones out until the block exits. Raises BranchWriteLockTimeout
+    if the in-flight writes do not finish in time.
+    """
+    from django.db import transaction
+    from django.db.utils import OperationalError
+
+    # In a savepoint, with a transaction-local lock_timeout: a timeout then rolls back only the
+    # savepoint, also when the caller is inside a transaction. The advisory lock itself is
+    # session-level, so it outlives the savepoint.
+    try:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SELECT set_config('lock_timeout', %s, true)", [f'{int(timeout * 1000)}ms'])
+            cursor.execute('SELECT pg_advisory_lock(%s, %s)', [BRANCH_WRITE_LOCK_NAMESPACE, branch.pk])
+    except OperationalError as e:
+        raise BranchWriteLockTimeout(
+            f'Timed out after {timeout}s waiting for in-flight writes to branch {branch} to finish'
+        ) from e
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_unlock(%s, %s)', [BRANCH_WRITE_LOCK_NAMESPACE, branch.pk])
