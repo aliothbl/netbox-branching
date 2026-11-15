@@ -58,6 +58,9 @@ class AppConfig(PluginConfig):
         # Seconds sent in the Retry-After header of the 503 response an API request receives
         # while the branch it selects is in a transitional status (e.g. syncing or merging).
         'unavailable_retry_after': 5,
+        # Seconds a merge or sync waits for write requests already running against the branch to
+        # finish before giving up (the branch goes back to "ready").
+        'write_drain_timeout': 300,
     }
 
     def ready(self):
@@ -105,6 +108,10 @@ class AppConfig(PluginConfig):
         retry_after = get_plugin_config('netbox_branching', 'unavailable_retry_after')
         if type(retry_after) is not int or retry_after < 1:
             raise ImproperlyConfigured("netbox_branching: 'unavailable_retry_after' must be a positive integer.")
+
+        drain_timeout = get_plugin_config('netbox_branching', 'write_drain_timeout')
+        if type(drain_timeout) is not int or drain_timeout < 1:
+            raise ImproperlyConfigured("netbox_branching: 'write_drain_timeout' must be a positive integer.")
 
         # Register cleanup handler for branch connections (#358)
         # This ensures branch connections are closed when they exceed CONN_MAX_AGE,

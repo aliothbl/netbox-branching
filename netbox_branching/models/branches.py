@@ -53,6 +53,7 @@ from netbox_branching.utilities import (
     BranchActionIndicator,
     ChangeSummary,
     activate_branch,
+    branch_exclusive_lock,
     get_branchable_object_types,
     get_tables_to_replicate,
     is_job_abandoned,
@@ -940,21 +941,35 @@ class Branch(JobsMixin, PrimaryModel):
         # Emit pre-sync signal
         pre_sync.send(sender=self.__class__, branch=self, user=user)
 
+        # Switch the status first and wait for in-flight writes to the branch (the branch write lock),
+        # as merge() does, so the sync never runs alongside a write request in the branch schema.
+        logger.debug(f'Setting branch status to {BranchStatusChoices.SYNCING}')
+        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.SYNCING)
+        locked = False
+        try:
+            with branch_exclusive_lock(self, get_plugin_config('netbox_branching', 'write_drain_timeout')):
+                locked = True
+                self._sync_locked(user, commit, logger)
+        except Exception:
+            # The body restores the status itself; only a failure to get the lock is handled here.
+            if not locked:
+                logger.error('Could not start sync: in-flight writes to the branch did not finish')
+                Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+            raise
+
+    def _sync_locked(self, user, commit, logger):
+        """The body of sync(), run with the status set to SYNCING and the branch write lock held."""
         # Watermark the sync where the change set is read: get_unsynced_changes() filters on
         # time__gt=last_sync, so storing the completion time would skip anything main committed
         # while this sync was running.
         sync_started = timezone.now()
 
-        # Retrieve unsynced changes before we update the Branch's status
         if changes := self.get_unsynced_changes().order_by('time'):
             logger.info(f'Found {len(changes)} changes to sync')
         else:
             logger.info('No changes found; aborting.')
+            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
             return
-
-        # Update Branch status
-        logger.debug(f'Setting branch status to {BranchStatusChoices.SYNCING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.SYNCING)
 
         # Generate a request ID for correlating ObjectChange records from this sync
         request_id = uuid.uuid4()
@@ -1039,6 +1054,7 @@ class Branch(JobsMixin, PrimaryModel):
         logger.info('Syncing completed')
 
     sync.alters_data = True
+    _sync_locked.alters_data = True
 
     def migrate(self, user):
         """
@@ -1144,16 +1160,32 @@ class Branch(JobsMixin, PrimaryModel):
         # Emit pre-merge signal
         pre_merge.send(sender=self.__class__, branch=self, user=user)
 
-        # Retrieve staged changes before we update the Branch's status
+        # Switch the status first, so that new write requests to the branch refuse themselves, then
+        # wait for the ones already running (the branch write lock) before reading the change log.
+        # Reading it first let a write committed in between stay in the branch schema, never merged
+        # and dropped with the schema when the branch is archived (F2).
+        logger.debug(f'Setting branch status to {BranchStatusChoices.MERGING}')
+        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.MERGING)
+        locked = False
+        try:
+            with branch_exclusive_lock(self, get_plugin_config('netbox_branching', 'write_drain_timeout')):
+                locked = True
+                self._merge_locked(user, commit, logger)
+        except Exception:
+            # The body restores the status itself; only a failure to get the lock is handled here.
+            if not locked:
+                logger.error('Could not start merge: in-flight writes to the branch did not finish')
+                Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+            raise
+
+    def _merge_locked(self, user, commit, logger):
+        """The body of merge(), run with the status set to MERGING and the branch write lock held."""
         if changes := self.get_unmerged_changes().order_by('time'):
             logger.info(f'Found {len(changes)} changes to merge')
         else:
             logger.info('No changes found; aborting.')
+            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
             return
-
-        # Update Branch status
-        logger.debug(f'Setting branch status to {BranchStatusChoices.MERGING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.MERGING)
 
         # Create a dummy request for the event_tracking() context manager
         request = RequestFactory().get(reverse('home'))
@@ -1200,6 +1232,7 @@ class Branch(JobsMixin, PrimaryModel):
         post_save.disconnect(handler, sender=ObjectChange_)
 
     merge.alters_data = True
+    _merge_locked.alters_data = True
 
     def revert(self, user, commit=True):
         """

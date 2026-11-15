@@ -1,16 +1,16 @@
 # SPEC-20261114-1738: Nenhuma escrita no branch se perde durante merge ou sync
 
-**Status:** draft
+**Status:** active
 **Porte:** G
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:38
-**Ativada:** —
+**Ativada:** 2026-11-15 19:39
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** merge, sync, perda-de-dados, advisory-lock, pg_advisory_xact_lock, janela, changelog, drop-schema, archive, diode
 **Features:** sync-merge-revert, routing, integration-diode
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1738-bloqueio-escritas-merge-sync`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1737 (status antes da leitura do changelog); SPEC-20261114-1736 (cenário `branch-merge-race`); SPEC-20261114-1741 (o que o cliente recebe enquanto o lock existe)
 **Origem:** DIAGNOSTICO F2 (crítico). Verificado no código em 2026-11-14 (`models/branches.py:1147-1156`).
