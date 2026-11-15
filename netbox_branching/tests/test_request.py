@@ -205,6 +205,32 @@ class RequestTestCase(TestCase):
                 self.assertIs(response.json()['retryable'], False)
                 self._assert_static_refusal(branch, status, response)
 
+    def test_discard_request_body_consumes_the_body(self):
+        """A refusal must not leave the request body unread on the connection."""
+        from netbox_branching.middleware import discard_request_body
+
+        request = RequestFactory().post('/api/dcim/sites/', data='x' * 300_000, content_type='application/json')
+        discard_request_body(request)
+        self.assertEqual(request.read(), b'')
+
+    @override_settings(LOGIN_REQUIRED=False)
+    def test_refusal_drains_the_request_body(self):
+        """
+        Under granian, a 503 sent with the body unread left the bytes on the keep-alive connection,
+        and the client's retry on it never completed. The middleware drains the body first.
+        """
+        branch = Branch.objects.first()
+        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.SYNCING)
+        with patch('netbox_branching.middleware.discard_request_body') as discard:
+            response = self.client.post(
+                reverse('dcim-api:site-list'),
+                data={'name': 'x' * 1000},
+                content_type='application/json',
+                headers={'x-netbox-branch': branch.schema_id},
+            )
+        self.assertEqual(response.status_code, 503)
+        discard.assert_called_once()
+
     @override_settings(LOGIN_REQUIRED=False)
     def test_ui_query_param_with_unready_branch_is_unchanged(self):
         """The UI keeps its behaviour: an unready branch is not activated and no 503/409 is sent."""

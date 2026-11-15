@@ -37,6 +37,23 @@ def branch_not_ready_response(status):
     return response
 
 
+def discard_request_body(request):
+    """
+    Read and drop the request body of a request refused without running its view.
+
+    A response sent while the body is still unread leaves those bytes on a keep-alive connection
+    under some application servers (granian, which NetBox ships with): the next request the client
+    sends on that connection then never completes. A client which retries a 503 on the same
+    connection, as it should, hangs until its own timeout. Draining the body keeps the connection
+    usable. Errors (e.g. the client went away) are ignored: the refusal is sent regardless.
+    """
+    try:
+        while request.read(64 * 1024):
+            pass
+    except Exception:  # noqa: S110
+        pass
+
+
 class BranchMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -78,8 +95,10 @@ class BranchMiddleware:
         try:
             branch = get_active_branch(request)
         except ObjectDoesNotExist:
+            discard_request_body(request)
             return HttpResponseBadRequest('Invalid branch identifier')
         except BranchNotReady as e:
+            discard_request_body(request)
             if is_api_request(request):
                 return branch_not_ready_response(e.status)
             return HttpResponseBadRequest(_('Selected branch is not ready.'))
