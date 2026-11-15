@@ -302,6 +302,25 @@ A list of import paths to functions which validate whether a branch is permitted
 
 ---
 
+## `unavailable_retry_after`
+
+Default: `5`
+
+The number of seconds sent in the `Retry-After` header of the `503 Service Unavailable` response
+that a REST or GraphQL API request receives while the branch it selects (via `X-NetBox-Branch`) is
+in a transitional status: new, provisioning, syncing, migrating, merging or reverting. Must be a
+positive integer. See [REST API](rest-api.md).
+
+```python
+PLUGINS_CONFIG = {
+    'netbox_branching': {
+        'unavailable_retry_after': 10,
+    }
+}
+```
+
+---
+
 ## NetBox Settings
 
 The settings below are not part of the plugin's own `PLUGINS_CONFIG` block, but interact with the plugin and may need to be updated in `configuration.py`.

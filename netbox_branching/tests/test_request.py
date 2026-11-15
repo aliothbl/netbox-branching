@@ -144,33 +144,103 @@ class RequestTestCase(TestCase):
         response = self.client.get(reverse('api-root'), headers={'x-netbox-branch': 'nonexist'})
         self.assertEqual(response.status_code, 400)
 
-    @override_settings(LOGIN_REQUIRED=False)
-    def test_api_header_with_unready_branch_returns_400(self):
-        """
-        A branch which exists but is not ready must be refused, not activated. get_active_branch()
-        used to return an HttpResponseBadRequest here, and both of its callers treat the return
-        value as a Branch: ActiveBranchContextManager installed the response object as the active
-        branch and BranchMiddleware assigned it to request.active_branch, so the first branchable
-        query raised AttributeError and the intended 400 surfaced as a 500 instead. See #672.
-        """
+    def _api_request_with_branch_status(self, status):
         self.add_permissions('dcim.view_site')
         branch = Branch.objects.first()
-        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.SYNCING)
-
+        Branch.objects.filter(pk=branch.pk).update(status=status)
         response = self.client.get(
             reverse('dcim-api:site-list'),
             headers={'x-netbox-branch': branch.schema_id},
         )
+        return branch, response
 
-        self.assertEqual(response.status_code, 400)
-        body = response.content.decode()
-        self.assertIn('Selected branch is not ready', body)
-
+    def _assert_static_refusal(self, branch, status, response):
         # The refusal is a static message: the BranchNotReady text names the branch and its status,
         # and must not be reflected back to the client (CodeQL: information exposure through an
-        # exception).
-        self.assertNotIn(branch.name, body, msg='Branch name leaked into the 400 response')
-        self.assertNotIn(BranchStatusChoices.SYNCING, body, msg='Branch status leaked into the 400 response')
+        # exception). The response is returned ahead of REST API authentication.
+        body = response.content.decode()
+        self.assertEqual(response.json()['detail'], 'Selected branch is not ready.')
+        self.assertNotIn(branch.name, body, msg='Branch name leaked into the response')
+        self.assertNotIn(branch.schema_id, body, msg='Branch schema ID leaked into the response')
+        self.assertNotIn(f'"{status}"', body, msg='Branch status leaked into the response')
+
+    @override_settings(LOGIN_REQUIRED=False)
+    def test_api_header_with_transitional_branch_returns_503(self):
+        """
+        A branch which exists but is syncing, merging, ... must be refused, not activated, and the
+        client told to come back: a sync of the default branch would otherwise turn everything an
+        ingestion pipeline sends meanwhile into a permanent failure. get_active_branch() used to
+        return an HttpResponseBadRequest here, which surfaced as a 500 (#672), then a 400.
+        """
+        for status in (BranchStatusChoices.NEW, *BranchStatusChoices.TRANSITIONAL):
+            with self.subTest(status=status):
+                branch, response = self._api_request_with_branch_status(status)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response['Retry-After'], '5')
+                self.assertIs(response.json()['retryable'], True)
+                self._assert_static_refusal(branch, status, response)
+
+    @override_settings(
+        LOGIN_REQUIRED=False,
+        PLUGINS_CONFIG={'netbox_branching': {'unavailable_retry_after': 30}},
+    )
+    def test_api_header_with_transitional_branch_honours_retry_after_setting(self):
+        _, response = self._api_request_with_branch_status(BranchStatusChoices.SYNCING)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response['Retry-After'], '30')
+
+    @override_settings(LOGIN_REQUIRED=False)
+    def test_api_header_with_terminal_branch_returns_409(self):
+        """A branch which will not become ready without an operator (or ever) answers 409, not 503."""
+        for status in (
+            BranchStatusChoices.MERGED,
+            BranchStatusChoices.ARCHIVED,
+            BranchStatusChoices.FAILED,
+            BranchStatusChoices.PENDING_MIGRATIONS,
+        ):
+            with self.subTest(status=status):
+                branch, response = self._api_request_with_branch_status(status)
+                self.assertEqual(response.status_code, 409)
+                self.assertNotIn('Retry-After', response)
+                self.assertIs(response.json()['retryable'], False)
+                self._assert_static_refusal(branch, status, response)
+
+    def test_discard_request_body_consumes_the_body(self):
+        """A refusal must not leave the request body unread on the connection."""
+        from netbox_branching.middleware import discard_request_body
+
+        request = RequestFactory().post('/api/dcim/sites/', data='x' * 300_000, content_type='application/json')
+        discard_request_body(request)
+        self.assertEqual(request.read(), b'')
+
+    @override_settings(LOGIN_REQUIRED=False)
+    def test_refusal_drains_the_request_body(self):
+        """
+        Under granian, a 503 sent with the body unread left the bytes on the keep-alive connection,
+        and the client's retry on it never completed. The middleware drains the body first.
+        """
+        branch = Branch.objects.first()
+        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.SYNCING)
+        with patch('netbox_branching.middleware.discard_request_body') as discard:
+            response = self.client.post(
+                reverse('dcim-api:site-list'),
+                data={'name': 'x' * 1000},
+                content_type='application/json',
+                headers={'x-netbox-branch': branch.schema_id},
+            )
+        self.assertEqual(response.status_code, 503)
+        discard.assert_called_once()
+
+    @override_settings(LOGIN_REQUIRED=False)
+    def test_ui_query_param_with_unready_branch_is_unchanged(self):
+        """The UI keeps its behaviour: an unready branch is not activated and no 503/409 is sent."""
+        branch = Branch.objects.first()
+        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.SYNCING)
+        response = self.client.get(f'{reverse("home")}?{QUERY_PARAM}={branch.schema_id}')
+        self.assertNotIn(response.status_code, (409, 503))
+        # Not activated: the branch cookie is not set to it (it is cleared, if anything).
+        if COOKIE_NAME in response.cookies:
+            self.assertNotEqual(response.cookies[COOKIE_NAME].value, branch.schema_id)
 
     def test_unready_branch_is_never_activated(self):
         """

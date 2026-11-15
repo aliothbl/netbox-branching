@@ -590,7 +590,14 @@ class BranchNotReady(Exception):
     or gone entirely, so the request has to be refused: BranchMiddleware translates this into an HTTP
     400. Callers which cannot refuse the request (such as request processors) must treat it as "no
     branch" rather than activating one.
+
+    ``status`` is the branch's status, which BranchMiddleware uses to tell a client whether to
+    wait (transitional) or give up (terminal). It must not be reflected back to the client.
     """
+
+    def __init__(self, message='', status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def get_active_branch(request):
@@ -609,7 +616,9 @@ def get_active_branch(request):
     if is_api_request(request) and BRANCH_HEADER_META in request.META:
         branch = Branch.objects.get(schema_id=request.META[BRANCH_HEADER_META])
         if not branch.ready:
-            raise BranchNotReady(f'Branch {branch} is not ready for use (status: {branch.status})')
+            raise BranchNotReady(
+                f'Branch {branch} is not ready for use (status: {branch.status})', status=branch.status
+            )
         return branch
 
     # Branch activated/deactivated by URL query parameter
