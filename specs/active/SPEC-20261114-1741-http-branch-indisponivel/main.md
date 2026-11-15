@@ -28,8 +28,8 @@
 
 **DENTRO:**
 - Status transitório → `503 Service Unavailable` + `Retry-After` (estimativa configurável).
-- Status terminal (merged, archived, failed, pending-migrations) → `409 Conflict`. Inexistente → `404 Not Found`.
-- Corpo JSON nas requisições de API com `{"branch": <schema_id>, "status": <status>, "retryable": bool}`. A UI mantém o comportamento atual (mensagem + redirect).
+- Status terminal (merged, archived, failed, pending-migrations) → `409 Conflict`. Inexistente → continua `400` (DEC-2, owner 2026-11-15).
+- Corpo JSON nas requisições de API: `{"detail": "Selected branch is not ready.", "retryable": bool}`, sem nome nem status do branch (DEC-1, owner 2026-11-15; teste de segurança #672 do upstream). A UI mantém o comportamento atual (mensagem + redirect).
 - Documentar o contrato em `docs/rest-api.md` (no fork, sob `specs/`, até haver PR upstream).
 
 **FORA:**
@@ -41,5 +41,5 @@
 - O contrato (código + campos do corpo) é o que a SPEC par do diode consome. Mudar exige atualizar as duas SPECs.
 
 ## Critério de aceite
-- [ ] Testes de API para cada status: transitório → 503 com `Retry-After`; terminal → 409; inexistente → 404; corpo JSON com `retryable` | verify: `./manage.py test netbox_branching.tests.test_api_branch_status`
+- [ ] Testes de API para cada status: transitório → 503 com `Retry-After`; terminal → 409; inexistente → 400; corpo JSON com `retryable` e sem nome/status do branch | verify: `./manage.py test netbox_branching.tests.test_api_branch_status`
 - [ ] UI sem mudança de comportamento (testes de view existentes verdes) | verify: `./manage.py test netbox_branching.tests`
