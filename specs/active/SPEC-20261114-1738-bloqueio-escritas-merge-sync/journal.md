@@ -1,7 +1,7 @@
 # Journal — SPEC-20261114-1738-bloqueio-escritas-merge-sync
 
 ## SNAPSHOT
-- **Fase:** implementação feita e testes unitários verdes; validando no bench (`branch-merge-race` ×5) e com a suíte completa.
+- **Fase:** implementada e validada (F2 5/5 sem perda; suíte sem falhas novas). Faltam do escopo: verificação ObjectChange × AppliedChange no fim do merge e proteção do `DROP SCHEMA` no archive.
 - **Antes (medido com o código atual, F6 já corrigido):** `branch-merge-race` ×5 (`aliothbl/diode:bench/results/20261115-193520-*`): cada merge perdeu 45–112 objetos (devices 4–11, interfaces 19–50, IPs 22–51), o Diode registrou tudo como APPLIED (0 FAILED). Os perdidos são as escritas em andamento no momento em que o merge leu o changelog: nenhum request chegou depois do MERGING (0 respostas 503).
 
 ## Decisões
@@ -13,4 +13,5 @@
 - **Fora desta entrega (fica no escopo da SPEC):** verificação ObjectChange × AppliedChange no fim do merge e a proteção do `DROP SCHEMA` no archive.
 
 ## LOG
+- 2026-11-15 21:16 — **Validado: F2 corrigido 5/5.** `branch-merge-race` ×5 (`aliothbl/diode:bench/results/20261115-204522-*`, branching `bd9e7be`, plugin `938afa0`, diode `9e1cb4b`): **0 objetos perdidos** em todas, contra 45–112 antes (`20261115-193520-*`). O merge aplicou 569 mudanças em todas (o total do branch no fim), enquanto no gatilho havia 429–536: ele esperou as escritas em andamento e as incluiu. Diode: 0 FAILED, 0 entidades esperando. Merge de 66–79 s (antes 39–59 s), por esperar as escritas em voo. Suíte completa (`...-full-1738.log`): 593 testes, as mesmas 33 falhas do `main` (SPEC-1916), nenhuma nova. Docs: `write_drain_timeout` em `configuration.md`.
 - 2026-11-15 20:26 — SPEC ativada (branch criado às 19:39 a partir de `main` `f45bfcf`). Implementação: `acquire_branch_write_lock` / `release_branch_write_lock` / `branch_exclusive_lock` em `utilities.py`; middleware toma o lock compartilhado em escritas e relê o status; `merge()` e `sync()` reordenados (`_merge_locked`, `_sync_locked`); setting `write_drain_timeout`. Testes novos em `tests/test_merge_concurrency.py` (7): lock preso durante a escrita, GET sem lock, 503 com o lock exclusivo tomado, status relido sob o lock, timeout do merge devolve READY, merge e sync leem o changelog já em MERGING/SYNCING e com o lock exclusivo. `test_merge_concurrency` + `test_request`: 28/29, e a falha é a que já existe no `main` (SPEC-1916). Log: `aliothbl/diode:bench/evidence/logs/20261115-nbb-test-1738.log`.

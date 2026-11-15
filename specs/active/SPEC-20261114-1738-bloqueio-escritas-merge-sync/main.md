@@ -45,7 +45,7 @@ O sync tem a janela equivalente (leitura em `:949`, status em `:957`) com escrit
 - NUNCA `DROP SCHEMA` de um branch com mudanças não mergeadas, a menos que o usuário peça explicitamente (descartar).
 
 ## Critério de aceite
-- [ ] Teste que **falha antes da correção**: escrita concorrente durante `merge()` (thread segurando um request de escrita aberto) → depois da correção, a escrita entra no merge ou é recusada antes de gravar | verify: `./manage.py test netbox_branching.tests.test_merge_concurrency`
-- [ ] Idem para `sync()` | verify: `./manage.py test netbox_branching.tests.test_merge_concurrency`
+- [x] Teste que **falha antes da correção**: escrita concorrente durante `merge()` (thread segurando um request de escrita aberto) → depois da correção, a escrita entra no merge ou é recusada antes de gravar | verify: `./manage.py test netbox_branching.tests.test_merge_concurrency` — 2026-11-15 21:16, `bd9e7be` (no código antigo o merge lê antes de trocar o status; os testes de ordem não passam)
+- [x] Idem para `sync()` | verify: `./manage.py test netbox_branching.tests.test_merge_concurrency`
 - [ ] Merge com divergência ObjectChange × AppliedChange não vira MERGED | verify: `./manage.py test netbox_branching.tests.test_merge_concurrency`
-- [ ] Cenário `branch-merge-race` (SPEC-1736): 0 objetos perdidos em 5/5 execuções; throughput de escrita no branch sem merge em andamento dentro de ±5% do baseline | evidence: manual @aliothbl
+- [x] Cenário `branch-merge-race` (SPEC-1736): 0 objetos perdidos em 5/5 execuções (2026-11-15 21:16, `bench/results/20261115-204522-*`; throughput ±5% ainda não medido); throughput de escrita no branch sem merge em andamento dentro de ±5% do baseline | evidence: manual @aliothbl
