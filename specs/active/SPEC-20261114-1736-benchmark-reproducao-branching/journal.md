@@ -15,6 +15,11 @@
 - **DEC-3 — O pacote do fork é montado sobre `site-packages`.** O `sys.path[0]` vazio poderia favorecer `/opt/netbox/netbox`, mas não é garantido sob o granian.
 
 ## LOG
+- 2026-11-15 10:54 — **F7 medido direto: custo real, mas pequeno (~1% do request).**
+  - **Microbenchmark** (nbshell, sem branch ativo, 15 modelos que o Diode toca, melhor de 5 × 20 000 chamadas; netbox-branching do fork `5810e84`): chamada vazia 0,04 µs; `supports_branching` **2,38 µs** (1,46–3,41 por modelo); a mesma função atrás de `functools.lru_cache` **0,08 µs**; `db_for_read` 3,04 µs; `db_for_write` 3,24 µs.
+  - **py-spy** (std, c=1, 90 s, 100 Hz; worker ocupado: 7422 amostras dentro do request do plugin; netbox-branching 1.2.0 do pip, mesmo router): `netbox_branching/database.py` em **1,36%** das amostras, `supports_branching` em **1,04%**.
+  - **Estimativa** (derivada, não medida): a ~11 ent/s com c=1, um request custa ~90 ms por entidade, então o router fica com ~1,2 ms (~400 chamadas de ~3 µs). Com cache por modelo (invalidado quando muda `exempt_models` ou os resolvers), cada chamada cai para menos de 1 µs: **ganho ≤ ~1% do tempo de request**. Isso explica por que o A/B ponta a ponta (ruído ~7–10%) não teve resolução.
+  - Evidências em `aliothbl/diode:bench/evidence/f7-20261115-1038/` (`micro.json`, profiles `.folded.gz`, `share.json`); ferramenta `bench/f7_router.py`. A tentativa de py-spy novo falhou (sem pip na imagem); a ferramenta foi corrigida para copiar o binário, mas não reexecutada.
 - 2026-11-15 10:14 — **F6 (`branch-sync-ingest`): reproduzido 5/5.** O Diode ingere no branch padrão (60 devices / 540 entidades, `CONCURRENCY=4`, lote 25). O main tem 2000 mudanças com change logging (tags) e o sync é disparado com ~30% da carga assentada (shell pré-aquecido, gatilho `/tmp/bench-sync-go`). Resultados (diode `030b22c`, plugin `ae04547`, netbox-branching `5810e84`):
   - sync de 36,8–38,5 s; as 2000 mudanças chegam ao branch e ele volta para READY;
   - **190–265 entidades FAILED** com `400 Selected branch is not ready.` (35–49% da carga), e o Diode não tenta de novo;
