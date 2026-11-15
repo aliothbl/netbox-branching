@@ -15,6 +15,13 @@
 - **DEC-3 — O pacote do fork é montado sobre `site-packages`.** O `sys.path[0]` vazio poderia favorecer `/opt/netbox/netbox`, mas não é garantido sob o granian.
 
 ## LOG
+- 2026-11-15 11:53 — **F3 (`branch-sync-watermark`): reproduzido 5/5** (mais 1 execução de teste, também positiva). Roteiro:
+  1. tag `bench-early` commitada no main;
+  2. um shell no main abre `transaction.atomic()` e cria `bench-late` (ObjectChange com `time` = T1), sem commitar;
+  3. o sync 1 começa depois de T1, aplica só `bench-early` e grava `last_sync = sync_started > T1`;
+  4. o shell commita `bench-late` depois que o sync 1 termina;
+  5. `bench-after` é commitada e roda o sync 2.
+  Em todas as execuções, `get_unsynced_changes()` antes do sync 2 lista só `bench-after`, e o branch termina com `bench-early` e `bench-after`. **`bench-late` está no main e nunca chega ao branch**, sem erro nem aviso. Resultados: `aliothbl/diode:bench/results/20261115-111122-*` e `20261115-111927-*`. Correção candidata: marca d'água por id/sequência de ObjectChange, ou por `xmin`/snapshot da transação, em vez de `time`; no mínimo, reler uma janela de segurança antes de `last_sync`, com dedupe por `AppliedChange`.
 - 2026-11-15 10:54 — **F7 medido direto: custo real, mas pequeno (~1% do request).**
   - **Microbenchmark** (nbshell, sem branch ativo, 15 modelos que o Diode toca, melhor de 5 × 20 000 chamadas; netbox-branching do fork `5810e84`): chamada vazia 0,04 µs; `supports_branching` **2,38 µs** (1,46–3,41 por modelo); a mesma função atrás de `functools.lru_cache` **0,08 µs**; `db_for_read` 3,04 µs; `db_for_write` 3,24 µs.
   - **py-spy** (std, c=1, 90 s, 100 Hz; worker ocupado: 7422 amostras dentro do request do plugin; netbox-branching 1.2.0 do pip, mesmo router): `netbox_branching/database.py` em **1,36%** das amostras, `supports_branching` em **1,04%**.
