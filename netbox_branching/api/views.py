@@ -18,7 +18,7 @@ from netbox_branching.choices import BranchStatusChoices
 from netbox_branching.constants import CONFLICTS_PREVIEW_LIMIT
 from netbox_branching.jobs import MergeBranchJob, RevertBranchJob, SyncBranchJob
 from netbox_branching.models import Branch, BranchEvent, ChangeDiff
-from netbox_branching.utilities import BranchStatusChanged, get_branchable_object_types
+from netbox_branching.utilities import BranchHasUnmergedChanges, BranchStatusChanged, get_branchable_object_types
 
 from . import serializers
 
@@ -157,6 +157,8 @@ class BranchViewSet(ModelViewSet):
         except BranchStatusChanged:
             # Another job (e.g. a revert) took the branch out of the merged status after the check above
             return HttpResponseBadRequest('Only merged branches can be archived.')
+        except BranchHasUnmergedChanges as e:
+            return HttpResponseBadRequest(str(e))
         branch.refresh_from_db()
 
         serializer = self.get_serializer(branch)
