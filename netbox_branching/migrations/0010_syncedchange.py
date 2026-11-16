@@ -9,6 +9,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AddField(
+            model_name='branch',
+            name='sync_watermark',
+            field=models.DateTimeField(blank=True, editable=False, null=True),
+        ),
         migrations.CreateModel(
             name='SyncedChange',
             fields=[

@@ -211,6 +211,10 @@ class Branch(JobsMixin, PrimaryModel):
         default=list,
     )
     last_sync = models.DateTimeField(blank=True, null=True, editable=False)
+    # Where the next sync starts reading main's change log. Usually a little before last_sync: it
+    # reaches back to the oldest transaction still open when the last sync read (see _sync_watermark()).
+    # Null until the first sync with this field, in which case last_sync is used.
+    sync_watermark = models.DateTimeField(blank=True, null=True, editable=False)
     merged_time = models.DateTimeField(verbose_name=_('merged time'), blank=True, null=True)
     merged_by = models.ForeignKey(
         to=get_user_model(), on_delete=models.SET_NULL, blank=True, null=True, related_name='+'
@@ -314,6 +318,7 @@ class Branch(JobsMixin, PrimaryModel):
     LIFECYCLE_FIELDS = (
         'status',
         'last_sync',
+        'sync_watermark',
         'merged_time',
         'merged_by',
         'applied_migrations',
@@ -394,7 +399,7 @@ class Branch(JobsMixin, PrimaryModel):
         # TODO: Remove this fallback logic in a future release
         # Backward compatibility for branches created before v0.5.6, which did not have last_sync set automatically
         # upon provisioning. Defaults to the branch creation time.
-        last_sync = self.last_sync or self.created
+        last_sync = self.sync_watermark or self.last_sync or self.created
         if self.status == BranchStatusChoices.READY:
             return (
                 ObjectChange.objects.using(DEFAULT_DB_ALIAS)
@@ -406,7 +411,7 @@ class Branch(JobsMixin, PrimaryModel):
 
     def _sync_watermark(self, sync_started):
         """
-        The point from which the next sync reads main's change log (stored as last_sync).
+        The point from which the next sync reads main's change log (stored as sync_watermark).
 
         ObjectChange.time is set when the change is saved, not when its transaction commits. A main
         transaction that saved a change before this sync read the change log, but commits after it, is
@@ -422,9 +427,9 @@ class Branch(JobsMixin, PrimaryModel):
             )
             oldest_open = cursor.fetchone()[0]
         margin = timedelta(seconds=get_plugin_config('netbox_branching', 'sync_watermark_margin'))
-        # Bounded look-back: last_sync also drives staleness, and a connection left idle in a
-        # transaction for hours must not age the branch. A change saved in a transaction open longer
-        # than this and committed after the sync is still missed (documented limitation).
+        # Bounded look-back, so that a connection left idle in a transaction for hours does not make
+        # every sync re-read (and keep SyncedChange rows for) hours of changes. A change saved in a
+        # transaction open longer than this and committed after the sync is still missed.
         oldest_allowed = sync_started - SYNC_WATERMARK_MAX_LOOKBACK
         if oldest_open is None or oldest_open < oldest_allowed:
             oldest_open = max(oldest_open or sync_started, oldest_allowed)
@@ -1092,9 +1097,12 @@ class Branch(JobsMixin, PrimaryModel):
 
         # Record the branch's last_synced time & update its status
         logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
-        if not self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY, last_sync=watermark):
+        if not self._transition_status(
+            BranchStatusChoices.SYNCING, BranchStatusChoices.READY, last_sync=sync_started, sync_watermark=watermark
+        ):
             raise Exception(f'The status of branch {self} changed while it was being synced')
-        self.last_sync = watermark
+        self.last_sync = sync_started
+        self.sync_watermark = watermark
         self.status = BranchStatusChoices.READY
         self.save(update_fields=['last_sync'])
 

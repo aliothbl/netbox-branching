@@ -90,15 +90,16 @@ class SyncWatermarkTestCase(TestCase):
         self.addCleanup(open_tx.close)
         saved_at = open_tx.started + timedelta(seconds=1)
         sync_started = saved_at + timedelta(seconds=10)
-        # The sync ran here; the change was not visible yet. It records its watermark as last_sync.
-        self.branch.last_sync = self.branch._sync_watermark(sync_started)
+        # The sync ran here; the change was not visible yet. It records its watermark.
+        self.branch.last_sync = sync_started
+        self.branch.sync_watermark = self.branch._sync_watermark(sync_started)
         # The transaction commits: the change becomes visible with its save time.
         late = self._change(saved_at)
         self.assertIn(late, self.branch.get_unsynced_changes())
 
     def test_already_synced_changes_are_skipped(self):
         """The overlap window is re-read; what the previous sync applied is excluded."""
-        self.branch.last_sync = timezone.now() - timedelta(minutes=1)
+        self.branch.sync_watermark = timezone.now() - timedelta(minutes=1)
         applied = self._change(timezone.now())
         pending = self._change(timezone.now())
         SyncedChange.objects.create(branch=self.branch, change=applied)
