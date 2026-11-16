@@ -1,7 +1,7 @@
 # Journal — SPEC-20261114-1739-sync-marca-dagua-por-commit
 
 ## SNAPSHOT
-- **Fase:** escopo completo (F3 5/5; F4, F15 e watermark monotônico em 2026-11-16 15:40; suíte 619 OK no NetBox 4.7.5). Falta revalidar no bench os cenários de sync com o código final.
+- **Fase:** escopo completo (F3 5/5; F4, F15 e watermark monotônico em 2026-11-16 15:40; suíte 619 OK no NetBox 4.7.5). Revalidado no bench com o código final (17:15).
 - **Antes (código atual, F1/F2 corrigidos):** `branch-sync-watermark` ×5 (`aliothbl/diode:bench/results/20261116-053257-*`): 5/5, a mudança salva antes do sync 1 e commitada depois **nunca chega ao branch**. O sync 2 só vê `bench-after`.
 
 ## Decisões
@@ -14,6 +14,7 @@
 - **DEC-8 — watermark monotônico (bug da DEC-1, achado no teste do F15).** O watermark de um sync = início − margem pode cair **antes** do limite inferior que o próprio sync usou para ler (`sync_watermark or last_sync or created`). Isso acontece quando o sync roda dentro da margem do provision (o `last_sync` do provision é o fim dele). O sync seguinte relia mudanças anteriores ao provision, que o snapshot já tinha copiado, e falhava nos CREATEs. Agora `watermark = max(calculado, limite inferior atual)`. Isso não afeta o F3: uma transação aberta durante um sync já tinha puxado o watermark daquele sync para trás.
 
 ## LOG
+- 2026-11-16 17:15 — **Bench com o código final** (`f82d2b5`; `aliothbl/diode:bench/evidence/logs/20261116-1545-sync-reval-f82d2b5.log`): `branch-sync-watermark` ×3, a mudança tardia é sincronizada nas 3; `branch-sync-ingest` ×2 com 0 faltando e 0 FAILED; `branch-merge-race` ×1 com 0 perdidos. A 1ª tentativa do watermark abortou antes de rodar: o seed da NetBox teve de ser refeito para o código novo, e o primeiro boot passou dos 900 s do healthcheck. Não é falha do código.
 - 2026-11-16 15:40 — **F4, F15 e watermark monotônico** (branch `spec/20261114-1739-f4-f15`, DEC-6 a DEC-8). Testes novos em `tests/test_sync_replay.py` (3, com schema provisionado):
   - **F4:** mudança do main com o branch em SYNCING, MIGRATING e PENDING_MIGRATIONS chega ao `ChangeDiff.current` e acusa o conflito. Falhava antes (`aliothbl/diode:bench/evidence/logs/20261116-nbb-test-1739-f4-f15-antes.log`).
   - **F15:** o commit da conexão default falha de verdade depois do commit do branch (com `commit` simulando erro, armado depois do último passo do sync); o sync seguinte não falha e não altera o branch. Sem a DEC-7 falha com ValidationError (`...-1739-f15-sem-correcao.log`).
