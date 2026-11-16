@@ -21,6 +21,7 @@ __all__ = (
 class BranchFilterSet(NetBoxModelFilterSet):
     status = django_filters.MultipleChoiceFilter(choices=BranchStatusChoices, null_value=None)
     last_sync = filters.MultiValueDateTimeFilter()
+    sync_watermark = filters.MultiValueDateTimeFilter()
     owner_id = django_filters.ModelMultipleChoiceFilter(
         field_name='owner',
         queryset=get_user_model().objects.all(),

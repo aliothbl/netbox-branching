@@ -46,7 +46,7 @@ Agravantes:
 - Aplicar o mesmo sync duas vezes é inócuo.
 
 ## Critério de aceite
-- [ ] Teste que **falha antes**: transação no main aberta antes do sync e commitada depois → o segundo sync traz a mudança | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
+- [x] Teste que **falha antes**: transação no main aberta antes do sync e commitada depois → o segundo sync traz a mudança | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
 - [ ] Teste: sync repetido não duplica nem altera estado | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
 - [ ] Teste: merge com mudança do main não sincronizada no mesmo objeto acusa conflito | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
-- [ ] Cenário `branch-sync-watermark` (SPEC-1736): main × branch idênticos depois do 2º sync em 5/5 | evidence: manual @aliothbl
+- [x] Cenário `branch-sync-watermark` (SPEC-1736): main × branch idênticos depois do 2º sync em 5/5 | evidence: manual @aliothbl — 2026-11-16 08:18: 5/5 (`bench/results/20261116-075335-*`), aguarda conferência

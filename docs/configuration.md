@@ -294,6 +294,27 @@ See [`auto_recover_stuck_branches`](#auto_recover_stuck_branches).
 
 ---
 
+## `sync_watermark_margin`
+
+Default: `5`
+
+A sync reads main's change log from a watermark rather than from the time of the previous sync: the
+start of the oldest database transaction that was still open when the previous sync read it (looking
+back at most one hour), minus this many seconds. A change saved in main inside a transaction that was
+still open during a sync, and committed only afterwards, is therefore picked up by the next sync instead
+of being skipped for good. The margin absorbs clock skew between NetBox and PostgreSQL; changes read
+again because of the overlap are skipped if they were already synced. Must be a non-negative integer.
+
+```python
+PLUGINS_CONFIG = {
+    'netbox_branching': {
+        'sync_watermark_margin': 10,
+    }
+}
+```
+
+---
+
 ## `sync_validators`
 
 Default: `[]` (empty list)
