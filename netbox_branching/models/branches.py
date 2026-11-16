@@ -64,7 +64,7 @@ from utilities.exceptions import AbortRequest, AbortTransaction
 from utilities.querysets import RestrictedQuerySet
 from utilities.serialization import serialize_object
 
-from .changes import ChangeDiff, ObjectChange
+from .changes import ChangeDiff, ObjectChange, SyncedChange
 
 __all__ = (
     'Branch',
@@ -187,6 +187,10 @@ def _fake_for_branch(migration):
     return has_model_operations
 
 
+# How far back the sync watermark may reach for open transactions (see Branch._sync_watermark()).
+SYNC_WATERMARK_MAX_LOOKBACK = timedelta(hours=1)
+
+
 class Branch(JobsMixin, PrimaryModel):
     name = models.CharField(verbose_name=_('name'), max_length=100, unique=True)
     owner = models.ForeignKey(
@@ -207,6 +211,10 @@ class Branch(JobsMixin, PrimaryModel):
         default=list,
     )
     last_sync = models.DateTimeField(blank=True, null=True, editable=False)
+    # Where the next sync starts reading main's change log. Usually a little before last_sync: it
+    # reaches back to the oldest transaction still open when the last sync read (see _sync_watermark()).
+    # Null until the first sync with this field, in which case last_sync is used.
+    sync_watermark = models.DateTimeField(blank=True, null=True, editable=False)
     merged_time = models.DateTimeField(verbose_name=_('merged time'), blank=True, null=True)
     merged_by = models.ForeignKey(
         to=get_user_model(), on_delete=models.SET_NULL, blank=True, null=True, related_name='+'
@@ -310,6 +318,7 @@ class Branch(JobsMixin, PrimaryModel):
     LIFECYCLE_FIELDS = (
         'status',
         'last_sync',
+        'sync_watermark',
         'merged_time',
         'merged_by',
         'applied_migrations',
@@ -390,14 +399,41 @@ class Branch(JobsMixin, PrimaryModel):
         # TODO: Remove this fallback logic in a future release
         # Backward compatibility for branches created before v0.5.6, which did not have last_sync set automatically
         # upon provisioning. Defaults to the branch creation time.
-        last_sync = self.last_sync or self.created
+        last_sync = self.sync_watermark or self.last_sync or self.created
         if self.status == BranchStatusChoices.READY:
             return (
                 ObjectChange.objects.using(DEFAULT_DB_ALIAS)
                 .exclude(application__branch=self)
+                .exclude(sync_applications__branch=self)
                 .filter(changed_object_type__in=get_branchable_object_types(), time__gt=last_sync)
             )
         return ObjectChange.objects.none()
+
+    def _sync_watermark(self, sync_started):
+        """
+        The point from which the next sync reads main's change log (stored as sync_watermark).
+
+        ObjectChange.time is set when the change is saved, not when its transaction commits. A main
+        transaction that saved a change before this sync read the change log, but commits after it, is
+        not visible to this sync; with the watermark at sync_started the next sync would filter it out
+        for good (F3). So the watermark goes back to the start of the oldest transaction still open on
+        the database, minus a margin for clock skew between NetBox and PostgreSQL. The overlap this
+        creates is deduplicated with SyncedChange.
+        """
+        with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+            cursor.execute(
+                'SELECT min(xact_start) FROM pg_stat_activity '
+                'WHERE datname = current_database() AND xact_start IS NOT NULL AND pid <> pg_backend_pid()'
+            )
+            oldest_open = cursor.fetchone()[0]
+        margin = timedelta(seconds=get_plugin_config('netbox_branching', 'sync_watermark_margin'))
+        # Bounded look-back, so that a connection left idle in a transaction for hours does not make
+        # every sync re-read (and keep SyncedChange rows for) hours of changes. A change saved in a
+        # transaction open longer than this and committed after the sync is still missed.
+        oldest_allowed = sync_started - SYNC_WATERMARK_MAX_LOOKBACK
+        if oldest_open is None or oldest_open < oldest_allowed:
+            oldest_open = max(oldest_open or sync_started, oldest_allowed)
+        return min(sync_started, oldest_open) - margin
 
     def _transition_status(self, expected, new, **fields):
         """
@@ -976,6 +1012,7 @@ class Branch(JobsMixin, PrimaryModel):
         # time__gt=last_sync, so storing the completion time would skip anything main committed
         # while this sync was running.
         sync_started = timezone.now()
+        watermark = self._sync_watermark(sync_started)
 
         if changes := self.get_unsynced_changes().order_by('time'):
             logger.info(f'Found {len(changes)} changes to sync')
@@ -1033,6 +1070,13 @@ class Branch(JobsMixin, PrimaryModel):
                 # record_change_diff actually fires and writes to the default DB.
                 self._flush_sync_buffer(sync_buffer, user, request_id, logger)
 
+                # Remember what this sync applied, so the next one skips it in the overlap window
+                # before the watermark, and forget what no sync will read again.
+                SyncedChange.objects.bulk_create(
+                    [SyncedChange(branch=self, change=change) for change in changes], ignore_conflicts=True
+                )
+                SyncedChange.objects.filter(branch=self, change__time__lte=watermark).delete()
+
                 # Now that the branch holds main's changes, move each affected object's
                 # conflict baseline forward to match (#640).
                 self._advance_sync_baselines(sync_buffer, logger)
@@ -1053,9 +1097,12 @@ class Branch(JobsMixin, PrimaryModel):
 
         # Record the branch's last_synced time & update its status
         logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
-        if not self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY, last_sync=sync_started):
+        if not self._transition_status(
+            BranchStatusChoices.SYNCING, BranchStatusChoices.READY, last_sync=sync_started, sync_watermark=watermark
+        ):
             raise Exception(f'The status of branch {self} changed while it was being synced')
         self.last_sync = sync_started
+        self.sync_watermark = watermark
         self.status = BranchStatusChoices.READY
         self.save(update_fields=['last_sync'])
 

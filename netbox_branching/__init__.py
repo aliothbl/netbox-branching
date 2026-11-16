@@ -61,6 +61,9 @@ class AppConfig(PluginConfig):
         # Seconds a merge or sync waits for write requests already running against the branch to
         # finish before giving up (the branch goes back to "ready").
         'write_drain_timeout': 300,
+        # Seconds subtracted from a sync's watermark to absorb clock skew between NetBox and PostgreSQL.
+        # Changes in the overlap are re-read and skipped if already synced.
+        'sync_watermark_margin': 5,
     }
 
     def ready(self):
@@ -112,6 +115,10 @@ class AppConfig(PluginConfig):
         drain_timeout = get_plugin_config('netbox_branching', 'write_drain_timeout')
         if type(drain_timeout) is not int or drain_timeout < 1:
             raise ImproperlyConfigured("netbox_branching: 'write_drain_timeout' must be a positive integer.")
+
+        watermark_margin = get_plugin_config('netbox_branching', 'sync_watermark_margin')
+        if type(watermark_margin) is not int or watermark_margin < 0:
+            raise ImproperlyConfigured("netbox_branching: 'sync_watermark_margin' must be a non-negative integer.")
 
         # Register cleanup handler for branch connections (#358)
         # This ensures branch connections are closed when they exceed CONN_MAX_AGE,

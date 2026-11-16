@@ -1,16 +1,16 @@
 # SPEC-20261114-1739: Sync não pula mudanças do main commitadas tarde
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:39
-**Ativada:** —
+**Ativada:** 2026-11-16 05:36
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** sync, last_sync, watermark, marca-dagua, ObjectChange.time, auto_now_add, transação-longa, ChangeDiff.current, conflito, 2PC
 **Features:** sync-merge-revert, change-tracking
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1739-sync-marca-dagua-por-commit`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1736 (cenário `branch-sync-watermark`)
 **Origem:** DIAGNOSTICO F3, F4 e F15.
@@ -46,7 +46,7 @@ Agravantes:
 - Aplicar o mesmo sync duas vezes é inócuo.
 
 ## Critério de aceite
-- [ ] Teste que **falha antes**: transação no main aberta antes do sync e commitada depois → o segundo sync traz a mudança | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
+- [x] Teste que **falha antes**: transação no main aberta antes do sync e commitada depois → o segundo sync traz a mudança | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
 - [ ] Teste: sync repetido não duplica nem altera estado | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
 - [ ] Teste: merge com mudança do main não sincronizada no mesmo objeto acusa conflito | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
-- [ ] Cenário `branch-sync-watermark` (SPEC-1736): main × branch idênticos depois do 2º sync em 5/5 | evidence: manual @aliothbl
+- [x] Cenário `branch-sync-watermark` (SPEC-1736): main × branch idênticos depois do 2º sync em 5/5 | evidence: manual @aliothbl — 2026-11-16 08:18: 5/5 (`bench/results/20261116-075335-*`), aguarda conferência
