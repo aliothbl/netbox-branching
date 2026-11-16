@@ -2,7 +2,7 @@ from typing import ClassVar
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseBadRequest
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -21,6 +21,16 @@ from netbox_branching.models import Branch, BranchEvent, ChangeDiff
 from netbox_branching.utilities import BranchHasUnmergedChanges, BranchStatusChanged, get_branchable_object_types
 
 from . import serializers
+
+
+
+def status_conflict(detail):
+    """
+    Refuse a branch action because of the branch's current status (e.g. merging a branch which is not
+    ready): the request itself is valid, so this is a 409 Conflict, not a 400. Validation failures (a
+    pre-action validator denying the action, an invalid body) remain 400.
+    """
+    return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
 
 
 class RootView(APIRootView):
@@ -68,7 +78,7 @@ class BranchViewSet(ModelViewSet):
 
         branch = self.get_object()
         if not branch.ready:
-            return HttpResponseBadRequest('Branch is not ready to sync.')
+            return status_conflict('Branch is not ready to sync.')
 
         serializer = serializers.CommitSerializer(data=request.data)
         commit = serializer.validated_data.get('commit', True) if serializer.is_valid() else False
@@ -96,7 +106,7 @@ class BranchViewSet(ModelViewSet):
 
         branch = self.get_object()
         if not branch.ready:
-            return HttpResponseBadRequest('Branch is not ready to merge.')
+            return status_conflict('Branch is not ready to merge.')
 
         serializer = serializers.CommitSerializer(data=request.data)
         commit = serializer.validated_data.get('commit', True) if serializer.is_valid() else False
@@ -112,7 +122,7 @@ class BranchViewSet(ModelViewSet):
     @extend_schema(
         methods=['post'],
         request=serializers.CommitSerializer(),
-        responses={200: JobSerializer()},
+        responses={200: JobSerializer(), 409: OpenApiResponse(description='The branch is not merged')},
     )
     @action(detail=True, methods=['post'])
     def revert(self, request, pk):
@@ -124,7 +134,7 @@ class BranchViewSet(ModelViewSet):
 
         branch = self.get_object()
         if not branch.merged:
-            return HttpResponseBadRequest('Only merged branches can be reverted.')
+            return status_conflict('Only merged branches can be reverted.')
 
         serializer = serializers.CommitSerializer(data=request.data)
         commit = serializer.validated_data.get('commit', True) if serializer.is_valid() else False
@@ -136,7 +146,10 @@ class BranchViewSet(ModelViewSet):
 
     @extend_schema(
         methods=['post'],
-        responses={200: serializers.BranchSerializer()},
+        responses={
+            200: serializers.BranchSerializer(),
+            409: OpenApiResponse(description='The branch is not merged, or holds changes made after its merge'),
+        },
     )
     @action(detail=True, methods=['post'])
     def archive(self, request, pk):
@@ -148,7 +161,7 @@ class BranchViewSet(ModelViewSet):
 
         branch = self.get_object()
         if not branch.merged:
-            return HttpResponseBadRequest('Only merged branches can be archived.')
+            return status_conflict('Only merged branches can be archived.')
         if not branch.can_archive:
             return HttpResponseBadRequest('Archiving this branch is not permitted.')
 
@@ -156,9 +169,9 @@ class BranchViewSet(ModelViewSet):
             branch.archive(user=request.user)
         except BranchStatusChanged:
             # Another job (e.g. a revert) took the branch out of the merged status after the check above
-            return HttpResponseBadRequest('Only merged branches can be archived.')
+            return status_conflict('Only merged branches can be archived.')
         except BranchHasUnmergedChanges as e:
-            return HttpResponseBadRequest(str(e))
+            return status_conflict(str(e))
         branch.refresh_from_db()
 
         serializer = self.get_serializer(branch)
@@ -167,7 +180,10 @@ class BranchViewSet(ModelViewSet):
     @extend_schema(
         methods=['post'],
         request=serializers.BranchRecoverSerializer(),
-        responses={200: serializers.BranchSerializer()},
+        responses={
+            200: serializers.BranchSerializer(),
+            409: OpenApiResponse(description='The branch is not stuck in a transitional status'),
+        },
     )
     @action(detail=True, methods=['post'])
     def recover(self, request, pk):
@@ -180,7 +196,7 @@ class BranchViewSet(ModelViewSet):
 
         branch = self.get_object()
         if branch.status not in BranchStatusChoices.TRANSITIONAL:
-            return HttpResponseBadRequest('Branch is not in a transitional status.')
+            return status_conflict('Branch is not in a transitional status.')
 
         # Recover only a branch which is demonstrably stuck, unless the caller explicitly forces it.
         serializer = serializers.BranchRecoverSerializer(data=request.data)
@@ -192,7 +208,7 @@ class BranchViewSet(ModelViewSet):
         if params.get('force', False):
             branch.force_recover(user=request.user, retry=retry)
         elif not branch.recover(user=request.user, retry=retry):
-            return HttpResponseBadRequest(
+            return status_conflict(
                 'A job for this branch still appears to be running. Pass force=true to recover it anyway.'
             )
 
