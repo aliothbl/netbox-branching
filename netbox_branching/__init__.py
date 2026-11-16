@@ -18,7 +18,7 @@ class AppConfig(PluginConfig):
     # Remember to update COMPATIBILITY.md when modifying the minimum/maximum supported NetBox versions.
     # NetBox 4.7 replaced django-mptt with a PostgreSQL ltree implementation and moved ltree/denorm
     # maintenance into database triggers; branch provisioning replicates those triggers, so 4.7 is required.
-    min_version = '4.7.0'
+    min_version = '4.7.4'
     max_version = '4.7.99'
     middleware = ('netbox_branching.middleware.BranchMiddleware',)
     default_settings = {
