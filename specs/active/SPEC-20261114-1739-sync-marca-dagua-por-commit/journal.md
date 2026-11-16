@@ -1,0 +1,15 @@
+# Journal — SPEC-20261114-1739-sync-marca-dagua-por-commit
+
+## SNAPSHOT
+- **Fase:** implementada (marca d'água + deduplicação); testes unitários verdes; validando no bench e com a suíte completa.
+- **Antes (código atual, F1/F2 corrigidos):** `branch-sync-watermark` ×5 (`aliothbl/diode:bench/results/20261116-053257-*`): 5/5, a mudança salva antes do sync 1 e commitada depois **nunca chega ao branch**. O sync 2 só vê `bench-after`.
+
+## Decisões
+- **DEC-1 — alternativa (a) da SPEC, com a margem guiada pelo banco.** Em vez de uma margem fixa adivinhada, o sync lê em `pg_stat_activity` o início da transação aberta mais antiga (qualquer transação, com ou sem xid: a que ainda vai salvar já está aberta) e grava `last_sync = min(início do sync, essa transação) − sync_watermark_margin` (padrão 5 s, para diferença de relógio NetBox × PostgreSQL). A alternativa (b) (xmin/snapshot) foi descartada: o `xmin` de 32 bits não converte com segurança para o `xid8` de `pg_visible_in_snapshot`, e o VACUUM congela o `xmin`.
+- **DEC-2 — deduplicação com `SyncedChange`** (nova tabela, migração 0010; branch + ObjectChange do main, únicos). Cada sync registra o que aplicou; `get_unsynced_changes()` exclui isso, e as linhas mais antigas que a nova marca d'água são podadas no fim de cada sync (a tabela fica do tamanho da janela de sobreposição). Sem isso, reler a janela reaplicaria um UPDATE antigo do main por cima de uma edição posterior no branch.
+- **DEC-3 — look-back limitado a 1 h** (`SYNC_WATERMARK_MAX_LOOKBACK`). `last_sync` também define a validade do branch (stale): uma conexão esquecida "idle in transaction" por horas não pode envelhecer o branch. Limitação: uma mudança salva numa transação aberta há mais de 1 h e commitada depois do sync ainda se perde.
+- **DEC-4 — `pg_stat_activity` precisa enxergar as outras sessões:** com um único usuário de banco para o NetBox (o normal), a coluna `xact_start` das sessões do mesmo usuário é visível. Com usuários diferentes, o papel precisa de `pg_read_all_stats`; sem isso, o comportamento cai no anterior (marca d'água = início do sync − margem).
+- **Fora desta entrega (fica no escopo da SPEC):** F4 (`ChangeDiff.current` em SYNCING e conflito no merge com mudança do main não sincronizada) e F15 (commit à prova de falha entre conexões).
+
+## LOG
+- 2026-11-16 05:50 — SPEC ativada (branch criado às 05:36 a partir de `main` `cff9410`, num worktree). Implementação: `Branch._sync_watermark()`, `SyncedChange` + migração 0010, exclusão em `get_unsynced_changes()`, registro e poda no `_sync_locked()`, setting `sync_watermark_margin`. Testes novos em `tests/test_sync_watermark.py` (6): marca d'água sem transação aberta, alcançando a transação aberta mais antiga, look-back limitado, **mudança commitada depois da leitura entra no sync seguinte** (falha antes: `last_sync` = início do sync), mudanças já sincronizadas puladas, unicidade. Com `test_status_transitions` e `test_merge_concurrency`: 19/19 (`aliothbl/diode:bench/evidence/logs/20261116-nbb-test-1739.log`).

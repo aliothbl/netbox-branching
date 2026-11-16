@@ -27,6 +27,7 @@ __all__ = (
     'AppliedChange',
     'ChangeDiff',
     'ObjectChange',
+    'SyncedChange',
 )
 
 
@@ -402,3 +403,25 @@ class AppliedChange(models.Model):
         ordering = ('branch', 'change')
         verbose_name = _('applied change')
         verbose_name_plural = _('applied changes')
+
+
+class SyncedChange(models.Model):
+    """
+    A change from main that a sync has already applied to a Branch.
+
+    The sync re-reads an overlap window before its watermark (see Branch._sync_watermark()), so that a
+    change committed in main after a sync read the change log is picked up by the next one (F3). The
+    changes of that window it already applied are recorded here and skipped; rows older than the
+    current watermark are pruned at the end of each sync, as no sync reads them again.
+    """
+
+    change = models.ForeignKey(to='core.ObjectChange', on_delete=models.CASCADE, related_name='sync_applications')
+    branch = models.ForeignKey(to='netbox_branching.Branch', on_delete=models.CASCADE, related_name='synced_changes')
+
+    class Meta:
+        ordering = ('branch', 'change')
+        constraints = (
+            models.UniqueConstraint(fields=('branch', 'change'), name='netbox_branching_syncedchange_unique'),
+        )
+        verbose_name = _('synced change')
+        verbose_name_plural = _('synced changes')

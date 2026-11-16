@@ -1,16 +1,16 @@
 # SPEC-20261114-1739: Sync não pula mudanças do main commitadas tarde
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:39
-**Ativada:** —
+**Ativada:** 2026-11-16 05:36
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** sync, last_sync, watermark, marca-dagua, ObjectChange.time, auto_now_add, transação-longa, ChangeDiff.current, conflito, 2PC
 **Features:** sync-merge-revert, change-tracking
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1739-sync-marca-dagua-por-commit`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1736 (cenário `branch-sync-watermark`)
 **Origem:** DIAGNOSTICO F3, F4 e F15.
