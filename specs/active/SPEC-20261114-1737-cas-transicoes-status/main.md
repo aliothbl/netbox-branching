@@ -1,16 +1,16 @@
 # SPEC-20261114-1737: Transições de status do Branch com compare-and-set
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:37
-**Ativada:** —
+**Ativada:** 2026-11-15 21:42
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** status, compare-and-set, CAS, merge-duplo, sync-duplo, rqworker, transição, signal-handler, finally
 **Features:** sync-merge-revert
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1737-cas-transicoes-status`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1738 (bloqueio de escritas; usa o mesmo ponto de transição); SPEC-20261114-1736 (cenário `branch-double-merge`)
 **Origem:** DIAGNOSTICO F1 e F14.
@@ -41,7 +41,7 @@ Além disso, o handler `post_save` de `record_applied_change` só é desconectad
 - NUNCA um rollback sobrescreve um status terminal (MERGED, ARCHIVED) colocado por outro job.
 
 ## Critério de aceite
-- [ ] Teste com duas execuções concorrentes de `merge()` no mesmo branch: exatamente uma aplica, a outra aborta, e o status final é MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Teste: falha no 2º merge não devolve READY a um branch MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Teste: exceção em `post_merge` não deixa `record_applied_change` conectado | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Cenário `branch-double-merge` (SPEC-1736) sem duplicação em 5/5 execuções | evidence: manual @aliothbl
+- [x] Teste com duas execuções concorrentes de `merge()` no mesmo branch: exatamente uma aplica, a outra aborta, e o status final é MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Teste: falha no 2º merge não devolve READY a um branch MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Teste: exceção em `post_merge` não deixa `record_applied_change` conectado | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Cenário `branch-double-merge` (SPEC-1736) sem duplicação em 5/5 execuções | evidence: manual @aliothbl — 2026-11-16 04:59: 8/8 (`bench/results/20261116-042348-*`, `-044607-*`), aguarda conferência
