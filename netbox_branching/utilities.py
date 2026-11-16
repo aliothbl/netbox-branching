@@ -612,6 +612,13 @@ class BranchStatusChanged(Exception):
     """
 
 
+class BranchHasUnmergedChanges(Exception):
+    """
+    Raised by Branch.archive() when the branch's schema holds changes recorded after its merge, which
+    were never applied to main and which dropping the schema would delete. The archive has had no effect.
+    """
+
+
 def get_active_branch(request):
     """
     Return the active Branch, or None if no branch is active.

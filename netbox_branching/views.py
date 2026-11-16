@@ -26,7 +26,7 @@ from .jobs import MergeBranchJob, MigrateBranchJob, RevertBranchJob, SyncBranchJ
 from .models import Branch, ChangeDiff
 from .object_actions import BulkMigrate
 from .ui import panels
-from .utilities import BranchStatusChanged, resolve_changes_summary
+from .utilities import BranchHasUnmergedChanges, BranchStatusChanged, resolve_changes_summary
 
 #
 # Branches
@@ -531,6 +531,9 @@ class BranchArchiveView(generic.ObjectView):
             except BranchStatusChanged:
                 # Another job (e.g. a revert) took the branch out of the merged status after the check
                 messages.error(request, _('Only merged branches can be archived.'))
+                return redirect(branch.get_absolute_url())
+            except BranchHasUnmergedChanges as e:
+                messages.error(request, str(e))
                 return redirect(branch.get_absolute_url())
 
             messages.success(request, _('Branch {branch} has been archived.').format(branch=branch))

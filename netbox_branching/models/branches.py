@@ -51,6 +51,7 @@ from netbox_branching.provisioning import (
 from netbox_branching.signals import *
 from netbox_branching.utilities import (
     BranchActionIndicator,
+    BranchHasUnmergedChanges,
     BranchStatusChanged,
     ChangeSummary,
     activate_branch,
@@ -1284,6 +1285,19 @@ class Branch(JobsMixin, PrimaryModel):
                     logger.debug(f'Merging using {self.merge_strategy} strategy')
                     strategy_class().merge(self, changes, request, logger, user)
 
+                    # Every change in the branch must have been part of this merge. The branch
+                    # write lock keeps HTTP write requests out, but a write made outside a request
+                    # (a script or job with activate_branch()) does not take it; one committed after
+                    # the change log was read would stay in the branch schema, never merged, and be
+                    # dropped with the schema on archive. Fail the merge instead: the transaction
+                    # rolls back, the branch returns to READY, and a new merge picks the change up.
+                    late = ObjectChange.objects.using(self.connection_name).count() - len(changes)
+                    if late > 0:
+                        raise Exception(
+                            f'{late} change(s) were written to branch {self} while it was '
+                            f'being merged; the merge has been rolled back. Merge the branch again.'
+                        )
+
                     if not commit:
                         raise AbortTransaction()
 
@@ -1805,11 +1819,36 @@ class Branch(JobsMixin, PrimaryModel):
         with transaction.atomic():
             if not self._transition_status(self.ARCHIVABLE_STATUSES, BranchStatusChoices.ARCHIVED):
                 raise BranchStatusChanged(f'Branch {self} cannot be archived in its current status')
+            if unmerged := self._changes_after_merge():
+                raise BranchHasUnmergedChanges(
+                    f'Branch {self} has {unmerged} change(s) made after it was merged; archiving it would '
+                    f'delete them. Revert and merge the branch again, or delete it to discard them.'
+                )
             self.deprovision()
             BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.ARCHIVED)
         self.status = BranchStatusChoices.ARCHIVED
 
     archive.alters_data = True
+
+    def _changes_after_merge(self):
+        """
+        Return the number of changes in a merged branch's schema recorded after its merge, which the
+        merge therefore did not apply to main and DROP SCHEMA would delete. Zero for a branch that is
+        not merged or has no schema. Runs on the default connection, inside the caller's transaction.
+        """
+        merged_time = Branch.objects.filter(pk=self.pk).values_list('merged_time', flat=True).first()
+        if merged_time is None:  # never merged, or reverted (which clears it)
+            return 0
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1 FROM pg_namespace WHERE nspname = %s', [self.schema_name])
+            if cursor.fetchone() is None:
+                return 0
+            cursor.execute(
+                f'SELECT count(*) FROM {quote_ident(self.schema_name)}.{quote_ident(ObjectChange_._meta.db_table)} '
+                f'WHERE time > %s',
+                [merged_time],
+            )
+            return cursor.fetchone()[0]
 
     def deprovision(self):
         """
