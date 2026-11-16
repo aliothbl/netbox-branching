@@ -41,7 +41,7 @@ Além disso, o handler `post_save` de `record_applied_change` só é desconectad
 - NUNCA um rollback sobrescreve um status terminal (MERGED, ARCHIVED) colocado por outro job.
 
 ## Critério de aceite
-- [ ] Teste com duas execuções concorrentes de `merge()` no mesmo branch: exatamente uma aplica, a outra aborta, e o status final é MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Teste: falha no 2º merge não devolve READY a um branch MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Teste: exceção em `post_merge` não deixa `record_applied_change` conectado | verify: `./manage.py test netbox_branching.tests.test_status_transitions`
-- [ ] Cenário `branch-double-merge` (SPEC-1736) sem duplicação em 5/5 execuções | evidence: manual @aliothbl
+- [x] Teste com duas execuções concorrentes de `merge()` no mesmo branch: exatamente uma aplica, a outra aborta, e o status final é MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Teste: falha no 2º merge não devolve READY a um branch MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Teste: exceção em `post_merge` não deixa `record_applied_change` conectado | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Cenário `branch-double-merge` (SPEC-1736) sem duplicação em 5/5 execuções | evidence: manual @aliothbl — 2026-11-16 04:59: 8/8 (`bench/results/20261116-042348-*`, `-044607-*`), aguarda conferência
