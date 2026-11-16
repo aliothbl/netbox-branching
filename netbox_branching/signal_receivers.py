@@ -105,6 +105,15 @@ def validate_branching_operations(sender, instance, **kwargs):
             )
 
 
+# Branch statuses in which main's changes to an object are tracked in the branch's ChangeDiffs.
+CHANGE_DIFF_TRACKED_STATUSES = (
+    BranchStatusChoices.READY,
+    BranchStatusChoices.SYNCING,
+    BranchStatusChoices.MIGRATING,
+    BranchStatusChoices.PENDING_MIGRATIONS,
+)
+
+
 @receiver(post_save, sender=ObjectChange)
 def record_change_diff(instance, **kwargs):
     """
@@ -131,8 +140,12 @@ def record_change_diff(instance, **kwargs):
             # though logger.debug() would defer the formatting.
             logger.debug('Updating change diff for global change to %s', instance.changed_object)
         current_data = instance.postchange_data_clean or None
+        # Every branch whose changes are still to be merged, not only READY ones: a change main makes
+        # while a branch is syncing or migrating used to be missed, and a later merge overwrote it
+        # without reporting a conflict (F4). Merging/reverting branches are excluded, as the global
+        # changes then are the merge or revert itself.
         for diff in ChangeDiff.objects.filter(
-            object_type=content_type, object_id=object_id, branch__status=BranchStatusChoices.READY
+            object_type=content_type, object_id=object_id, branch__status__in=CHANGE_DIFF_TRACKED_STATUSES
         ).select_related('object_type'):
             diff.current = current_data
             # object_repr is excluded from update_fields because save() recomputes it from the

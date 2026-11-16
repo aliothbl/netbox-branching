@@ -47,6 +47,6 @@ Agravantes:
 
 ## Critério de aceite
 - [x] Teste que **falha antes**: transação no main aberta antes do sync e commitada depois → o segundo sync traz a mudança | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
-- [ ] Teste: sync repetido não duplica nem altera estado | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
-- [ ] Teste: merge com mudança do main não sincronizada no mesmo objeto acusa conflito | verify: `./manage.py test netbox_branching.tests.test_sync_watermark`
+- [x] Teste: sync repetido não duplica nem altera estado (inclusive depois de perder o commit da conexão default) | verify: `./manage.py test netbox_branching.tests.test_sync_replay` (2026-11-16 15:40)
+- [x] Teste: mudança do main no mesmo objeto, inclusive durante sync/migração, acusa conflito | verify: `./manage.py test netbox_branching.tests.test_sync_replay` (2026-11-16 15:40)
 - [x] Cenário `branch-sync-watermark` (SPEC-1736): main × branch idênticos depois do 2º sync em 5/5 | evidence: manual @aliothbl — 2026-11-16 08:18: 5/5 (`bench/results/20261116-075335-*`), aguarda conferência

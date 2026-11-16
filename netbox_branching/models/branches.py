@@ -1020,13 +1020,37 @@ class Branch(JobsMixin, PrimaryModel):
                 self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY)
             raise
 
+    def _record_sync_progress(self, changes, watermark):
+        """
+        Record, in the current transaction of the branch connection, the changes a sync applied
+        (SyncedChange) and the branch's new sync watermark. The tables live in main's schema and are
+        named with it explicitly, as the branch connection's search_path puts the branch schema first.
+        """
+        main_schema = quote_ident(get_plugin_config('netbox_branching', 'main_schema'))
+        synced_table = f'{main_schema}.{quote_ident(SyncedChange._meta.db_table)}'
+        branch_table = f'{main_schema}.{quote_ident(Branch._meta.db_table)}'
+        change_ids = [change.pk for change in changes]
+        with connections[self.connection_name].cursor() as cursor:
+            for start in range(0, len(change_ids), 1000):
+                batch = change_ids[start : start + 1000]
+                cursor.execute(
+                    f'INSERT INTO {synced_table} (branch_id, change_id) '
+                    f'SELECT %s, unnest(%s::bigint[]) ON CONFLICT DO NOTHING',
+                    [self.pk, batch],
+                )
+            cursor.execute(f'UPDATE {branch_table} SET sync_watermark = %s WHERE id = %s', [watermark, self.pk])
+
     def _sync_locked(self, user, commit, logger):
         """The body of sync(), run with the status set to SYNCING and the branch write lock held."""
         # Watermark the sync where the change set is read: get_unsynced_changes() filters on
         # time__gt=last_sync, so storing the completion time would skip anything main committed
         # while this sync was running.
         sync_started = timezone.now()
-        watermark = self._sync_watermark(sync_started)
+        # Never behind the bound this sync reads from (see get_unsynced_changes()): what lies before it
+        # was covered by the provisioning snapshot or an earlier sync. A sync run within the margin of
+        # provisioning used to set a watermark before the provisioning time, and the next sync then
+        # replayed changes the branch was created with, failing on every CREATE.
+        watermark = max(self._sync_watermark(sync_started), self.sync_watermark or self.last_sync or self.created)
 
         if changes := self.get_unsynced_changes().order_by('time'):
             logger.info(f'Found {len(changes)} changes to sync')
@@ -1085,10 +1109,13 @@ class Branch(JobsMixin, PrimaryModel):
                 self._flush_sync_buffer(sync_buffer, user, request_id, logger)
 
                 # Remember what this sync applied, so the next one skips it in the overlap window
-                # before the watermark, and forget what no sync will read again.
-                SyncedChange.objects.bulk_create(
-                    [SyncedChange(branch=self, change=change) for change in changes], ignore_conflicts=True
-                )
+                # before the watermark, and advance the watermark. Both are written on the branch
+                # connection (to main's tables, by qualified name), so they commit in the same
+                # transaction as the changes they describe. On the default connection they committed
+                # separately, after the branch: losing that commit left the branch holding changes the
+                # next sync then replayed onto it, failing on every CREATE (F15).
+                self._record_sync_progress(changes, watermark)
+                # Forget what no sync will read again. Losing this only leaves rows a later sync prunes.
                 SyncedChange.objects.filter(branch=self, change__time__lte=watermark).delete()
 
                 # Now that the branch holds main's changes, move each affected object's
