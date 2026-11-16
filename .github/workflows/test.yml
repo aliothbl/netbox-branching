@@ -103,6 +103,9 @@ jobs:
         python-version: ['3.12', '3.13', '3.14']
         netbox-ref:
           - 'main'
+          # The minimum NetBox version declared in netbox_branching/__init__.py (min_version): the
+          # supported range must be tested, not just the newest NetBox (SPEC-20261115-1916).
+          - 'v4.7.4'
         shard: [merge-squash, merge-iterative, rest]
         include:
           - coverage: false

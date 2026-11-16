@@ -1,16 +1,16 @@
 # SPEC-20261115-1916: Suíte verde (e comportamento correto) no NetBox mínimo declarado, 4.7.0
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-15 19:16
-**Ativada:** —
+**Ativada:** 2026-11-16 09:57
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** testes, CI, compatibilidade, min_version, 4.7.0, cabo, CablePath, terminations, merge, revert, sync, query count
 **Features:** merge, sync, revert, routing
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261115-1916-suite-verde-netbox-4-7-0`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1741 (a validação dela encontrou isto); SPEC-20261114-1736 (harness)
 **Origem:** suíte completa rodada em 2026-11-15 com o NetBox **4.7.0** (imagem `diode-bench/netbox:v4.7.0`, runner `aliothbl/diode:bench/tools/nbb-test.sh`). O `main` intacto (`d091fd3`) tem **33 falhas** (29 F + 4 E de 581 testes), as mesmas no branch da SPEC-1741. Logs: `aliothbl/diode:bench/evidence/logs/20261115-nbb-test-full-main-baseline.log` e `...-full-1741.log`.
@@ -44,6 +44,6 @@
 - Merge, revert e sync de cabos deixam os cable paths corretos em toda versão suportada.
 
 ## Critério de aceite
-- [ ] Diagnóstico por grupo registrado no journal (teste × comportamento), com a versão do NetBox em que cada um passa | evidence: manual @aliothbl
-- [ ] Suíte completa verde no NetBox 4.7.0 (ou `min_version` elevado com justificativa) | verify: `bench/tools/nbb-test.sh netbox_branching.tests` (repo aliothbl/diode)
-- [ ] CI testa o `min_version` declarado | verify: `.github/workflows/test.yml` com `netbox-ref` do `min_version`
+- [x] Diagnóstico por grupo registrado no journal (teste × comportamento), com a versão do NetBox em que cada um passa | evidence: manual @aliothbl — 2026-11-16 10:45: journal DEC-1
+- [x] Suíte completa verde no NetBox 4.7.0 (ou `min_version` elevado com justificativa) | verify: `bench/tools/nbb-test.sh netbox_branching.tests` (repo aliothbl/diode) — 2026-11-16 10:45: `min_version` elevado para 4.7.4; 605/605 no 4.7.4 e no 4.7.5
+- [x] CI testa o `min_version` declarado | verify: `.github/workflows/test.yml` com `netbox-ref` do `min_version` — 2026-11-16 10:45: `v4.7.4` na matriz (execução do CI no fork pendente)

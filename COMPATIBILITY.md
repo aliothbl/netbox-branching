@@ -2,6 +2,7 @@
 
 | Release | Minimum NetBox Version | Maximum NetBox Version |
 |---------|------------------------|------------------------|
+| _next_  | 4.7.4                  | 4.7.x                  |
 | 1.2.3   | 4.7.0                  | 4.7.x                  |
 | 1.2.2   | 4.7.0                  | 4.7.x                  |
 | 1.2.1   | 4.7.0                  | 4.7.x                  |
@@ -35,3 +36,9 @@
 | 0.5.1   | 4.1.0                  | 4.3.x                  |
 | 0.5.0   | 4.1.0                  | 4.3.x                  |
 | 0.4.0   | 4.1.0                  | 4.3.x                  |
+
+**NetBox 4.7.0 – 4.7.3 and cables.** Before NetBox 4.7.4, some cable changes (clearing a cable end,
+moving or reordering terminations, deleting a cable) were not fully recorded in the change log, so
+merging, reverting or syncing a branch that contains them could leave cable paths broken. The test
+suite shows it: 33 failures on 4.7.0 and 4.7.1, 12 on 4.7.2, 1 (a pinned query count) on 4.7.3, none on
+4.7.4 and 4.7.5. Hence the minimum of 4.7.4 for the next release.
