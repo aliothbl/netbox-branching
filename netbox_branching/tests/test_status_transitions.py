@@ -14,6 +14,7 @@ from core.models import ObjectChange
 from netbox_branching.choices import BranchStatusChoices
 from netbox_branching.models import Branch
 from netbox_branching.signals import post_merge
+from netbox_branching.utilities import BranchStatusChanged
 
 
 class StatusTransitionTestCase(TestCase):
@@ -100,3 +101,78 @@ class StatusTransitionTestCase(TestCase):
             self.branch.merge(user=None)
         self.assertEqual(len(post_save._live_receivers(ObjectChange)[0]), receivers_before)
         self.assertEqual(self._status(), BranchStatusChoices.MERGED)
+
+
+class ProvisionArchiveTransitionTestCase(TestCase):
+    """
+    Provision and archive claim the branch with a compare-and-set too: a second provision job must not
+    rebuild (or, on failure, drop) the schema, and an archive must not drop the schema of a branch a job
+    is working in (e.g. one being reverted).
+    """
+
+    def _branch(self, status):
+        branch = Branch(name=f'Branch {status}')
+        branch.status = status
+        branch.save(provision=False)
+        return branch
+
+    def _status(self, branch):
+        return Branch.objects.get(pk=branch.pk).status
+
+    def test_provision_only_from_new(self):
+        branch = self._branch(BranchStatusChoices.READY)
+        with (
+            patch('netbox_branching.models.branches.get_tables_to_replicate') as tables,
+            self.assertRaises(BranchStatusChanged),
+        ):
+            branch.provision(user=None)
+        tables.assert_not_called()
+        self.assertEqual(self._status(branch), BranchStatusChoices.READY)
+
+    def test_second_provision_job_aborts(self):
+        branch = self._branch(BranchStatusChoices.NEW)
+        stale = Branch.objects.get(pk=branch.pk)  # loaded while NEW
+        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.PROVISIONING)  # the first job
+        with (
+            patch('netbox_branching.models.branches.get_tables_to_replicate') as tables,
+            self.assertRaises(BranchStatusChanged),
+        ):
+            stale.provision(user=None)
+        tables.assert_not_called()
+        self.assertEqual(self._status(branch), BranchStatusChoices.PROVISIONING)
+
+    def test_archive_does_not_drop_the_schema_of_a_branch_being_reverted(self):
+        branch = self._branch(BranchStatusChoices.MERGED)
+        stale = Branch.objects.get(pk=branch.pk)  # loaded while MERGED, e.g. by the auto-archive job
+        Branch.objects.filter(pk=branch.pk).update(status=BranchStatusChoices.REVERTING)  # a revert started
+        with patch.object(Branch, 'deprovision') as deprovision, self.assertRaises(BranchStatusChanged):
+            stale.archive(user=None)
+        deprovision.assert_not_called()
+        self.assertEqual(self._status(branch), BranchStatusChoices.REVERTING)
+        self.assertFalse(branch.events.filter(type='archived').exists())
+
+    def test_archive_refused_in_every_transitional_status(self):
+        for status in BranchStatusChoices.TRANSITIONAL:
+            branch = self._branch(status)
+            with patch.object(Branch, 'deprovision') as deprovision, self.assertRaises(BranchStatusChanged):
+                branch.archive(user=None)
+            deprovision.assert_not_called()
+            self.assertEqual(self._status(branch), status)
+
+    def test_archive_twice(self):
+        branch = self._branch(BranchStatusChoices.MERGED)
+        stale = Branch.objects.get(pk=branch.pk)
+        with patch.object(Branch, 'deprovision'):
+            branch.archive(user=None)
+            with self.assertRaises(BranchStatusChanged):
+                stale.archive(user=None)
+        self.assertEqual(self._status(branch), BranchStatusChoices.ARCHIVED)
+        self.assertEqual(branch.events.filter(type='archived').count(), 1)
+
+    def test_archive_merged(self):
+        branch = self._branch(BranchStatusChoices.MERGED)
+        with patch.object(Branch, 'deprovision') as deprovision:
+            branch.archive(user=None)
+        deprovision.assert_called_once()
+        self.assertEqual(self._status(branch), BranchStatusChoices.ARCHIVED)
+        self.assertEqual(branch.status, BranchStatusChoices.ARCHIVED)
