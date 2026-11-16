@@ -8,7 +8,7 @@
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
-**Keywords:** status, compare-and-set, CAS, merge-duplo, sync-duplo, rqworker, transição, signal-handler, finally
+**Keywords:** status, provision, archive, compare-and-set, CAS, merge-duplo, sync-duplo, rqworker, transição, signal-handler, finally
 **Features:** sync-merge-revert
 **Branch:** `spec/20261114-1737-cas-transicoes-status`
 **Programa:** —
@@ -44,4 +44,5 @@ Além disso, o handler `post_save` de `record_applied_change` só é desconectad
 - [x] Teste com duas execuções concorrentes de `merge()` no mesmo branch: exatamente uma aplica, a outra aborta, e o status final é MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
 - [x] Teste: falha no 2º merge não devolve READY a um branch MERGED | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
 - [x] Teste: exceção em `post_merge` não deixa `record_applied_change` conectado | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 04:59, `ee957fe`)
+- [x] Provision só a partir de NEW, e archive nunca apaga o schema de um branch com job em andamento | verify: `./manage.py test netbox_branching.tests.test_status_transitions` (2026-11-16 13:44)
 - [x] Cenário `branch-double-merge` (SPEC-1736) sem duplicação em 5/5 execuções | evidence: manual @aliothbl — 2026-11-16 04:59: 8/8 (`bench/results/20261116-042348-*`, `-044607-*`), aguarda conferência

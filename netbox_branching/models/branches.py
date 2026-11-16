@@ -51,6 +51,7 @@ from netbox_branching.provisioning import (
 from netbox_branching.signals import *
 from netbox_branching.utilities import (
     BranchActionIndicator,
+    BranchStatusChanged,
     ChangeSummary,
     activate_branch,
     branch_exclusive_lock,
@@ -227,6 +228,18 @@ class Branch(JobsMixin, PrimaryModel):
         null=True,
         default=None,
         help_text=_('Strategy used to merge this branch'),
+    )
+
+    # Statuses a branch can be archived from: those no background job is working in. Archiving drops
+    # the schema, so a branch which is provisioning, syncing, migrating, merging or reverting must not
+    # be archived until that job has finished. (The UI and REST API further restrict archiving to
+    # merged branches.)
+    ARCHIVABLE_STATUSES = (
+        BranchStatusChoices.NEW,
+        BranchStatusChoices.READY,
+        BranchStatusChoices.PENDING_MIGRATIONS,
+        BranchStatusChoices.MERGED,
+        BranchStatusChoices.FAILED,
     )
 
     _preaction_validators = {
@@ -1429,11 +1442,15 @@ class Branch(JobsMixin, PrimaryModel):
         main_schema = get_plugin_config('netbox_branching', 'main_schema')
         workers = get_plugin_config('netbox_branching', 'provision_workers') or 1
 
+        # Claim the branch before touching the database: only a NEW branch is provisioned, and only
+        # once. A second provision job for the same branch (an rq retry, a re-enqueue) must not create
+        # the schema again, nor — through the failure path below — drop the schema the first job built.
+        if not self._transition_status(BranchStatusChoices.NEW, BranchStatusChoices.PROVISIONING):
+            raise BranchStatusChanged(f'Branch {self} cannot be provisioned: it is no longer new')
+        self.status = BranchStatusChoices.PROVISIONING
+
         # Emit pre-provision signal
         pre_provision.send(sender=self.__class__, branch=self, user=user)
-
-        # Update Branch status
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.PROVISIONING)
 
         schema = self.schema_name
         tables_to_replicate = get_tables_to_replicate()
@@ -1677,7 +1694,7 @@ class Branch(JobsMixin, PrimaryModel):
                     cursor.execute(f'DROP SCHEMA IF EXISTS {quote_ident(schema)} CASCADE')
             except Exception:
                 logger.exception(f'Failed to drop schema {schema} during provision cleanup')
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.FAILED)
+            self._transition_status(BranchStatusChoices.PROVISIONING, BranchStatusChoices.FAILED)
             raise
 
         # Emit post-provision signal
@@ -1685,10 +1702,13 @@ class Branch(JobsMixin, PrimaryModel):
 
         logger.info('Provisioning completed')
 
-        Branch.objects.filter(pk=self.pk).update(
-            status=BranchStatusChoices.READY,
-            last_sync=timezone.now(),
-        )
+        # Conditional, like every other final transition: if the branch was recovered (reset to
+        # FAILED) while this job was still running, the reset stands.
+        if not self._transition_status(
+            BranchStatusChoices.PROVISIONING, BranchStatusChoices.READY, last_sync=timezone.now()
+        ):
+            raise BranchStatusChanged(f'Branch {self} left the provisioning status while it was being provisioned')
+        self.status = BranchStatusChoices.READY
         BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.PROVISIONED)
 
     provision.alters_data = True
@@ -1776,12 +1796,18 @@ class Branch(JobsMixin, PrimaryModel):
         if not self.can_archive:
             raise Exception('Archiving this branch is not permitted.')
 
-        # Drop the schema and flip the status atomically so a failure after the schema
-        # has been dropped does not leave an un-archived Branch with no schema.
+        # Flip the status and drop the schema atomically so a failure after the schema has been
+        # dropped does not leave an un-archived Branch with no schema. The status flips first and
+        # only from a status no job is working in: the conditional UPDATE locks the branch row, so a
+        # revert, sync or merge that has not started yet waits for it and then finds the branch
+        # archived, and one already running (status REVERTING, SYNCING, ...) makes the archive abort
+        # here instead of dropping the schema under it.
         with transaction.atomic():
+            if not self._transition_status(self.ARCHIVABLE_STATUSES, BranchStatusChoices.ARCHIVED):
+                raise BranchStatusChanged(f'Branch {self} cannot be archived in its current status')
             self.deprovision()
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.ARCHIVED)
             BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.ARCHIVED)
+        self.status = BranchStatusChoices.ARCHIVED
 
     archive.alters_data = True
 

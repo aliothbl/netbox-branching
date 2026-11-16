@@ -581,7 +581,6 @@ class BranchMiddlewareTestCase(FastTeardownTransactionTestCase):
         """
         # Create and provision a branch
         branch = Branch(name='Test Branch')
-        branch.status = BranchStatusChoices.READY
         branch.save(provision=False)
         branch.provision(user=None)
 
@@ -621,7 +620,6 @@ class BranchMiddlewareTestCase(FastTeardownTransactionTestCase):
         """
         # Create and provision a branch
         branch = Branch(name='Test Branch')
-        branch.status = BranchStatusChoices.READY
         branch.save(provision=False)
         branch.provision(user=None)
 

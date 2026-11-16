@@ -15,6 +15,7 @@ from netbox.context_managers import event_tracking
 from netbox_branching.choices import BranchStatusChoices
 from netbox_branching.constants import COOKIE_NAME
 from netbox_branching.models import Branch, ChangeDiff
+from netbox_branching.utilities import BranchStatusChanged
 from netbox_branching.tests.utils import FastTeardownTransactionTestCase
 from users.models import Token
 
@@ -177,6 +178,17 @@ class BranchArchiveAPITestCase(BaseAPITestCase, TestCase):
 
         branch.refresh_from_db()
         self.assertEqual(branch.status, 'ready')
+
+    def test_archive_endpoint_status_changed_concurrently(self):
+        # A revert took the branch out of MERGED between the endpoint's check and the archive itself.
+        branch = Branch(name='Test Branch', status=BranchStatusChoices.MERGED)
+        branch.save(provision=False)
+
+        url = reverse('plugins-api:netbox_branching-api:branch-archive', kwargs={'pk': branch.pk})
+        with patch.object(Branch, 'archive', side_effect=BranchStatusChanged('status changed')):
+            response = self.client.post(url, **self.header)
+
+        self.assertEqual(response.status_code, 400)
 
     def test_patch_status_archived_blocked(self):
         branch = Branch(name='Test Branch', status=BranchStatusChoices.MERGED)

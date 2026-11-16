@@ -604,6 +604,14 @@ class BranchNotReady(Exception):
         self.status = status
 
 
+class BranchStatusChanged(Exception):
+    """
+    Raised by a Branch lifecycle operation when the branch is no longer in a status the operation can
+    start from: another job or request moved it first (for example, a revert started before an
+    archive, or a second provision job for the same branch). The operation has had no effect.
+    """
+
+
 def get_active_branch(request):
     """
     Return the active Branch, or None if no branch is active.
