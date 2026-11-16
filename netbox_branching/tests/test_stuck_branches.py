@@ -713,14 +713,14 @@ class BranchRecoverAPITestCase(BranchConnectionCleanupMixin, TestCase):
     def test_non_transitional_branch_is_rejected(self):
         branch = make_branch('API Ready', BranchStatusChoices.READY)
         response = self.client.post(self._url(branch), **self.header)
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
 
     def test_live_job_is_rejected_without_force(self):
         branch = make_branch('API Live', BranchStatusChoices.SYNCING)
         make_job(branch, SyncBranchJob.Meta.name)
         with patch('netbox_branching.utilities._get_rq_job_status', return_value='started'):
             response = self.client.post(self._url(branch), **self.header)
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
         branch.refresh_from_db()
         self.assertEqual(branch.status, BranchStatusChoices.SYNCING)
 

@@ -1,6 +1,6 @@
 # SPEC-20261114-1737: Transições de status do Branch com compare-and-set
 
-**Status:** active
+**Status:** active (escopo completo; aguardando revisão)
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:37

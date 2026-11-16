@@ -15,7 +15,7 @@ from netbox.context_managers import event_tracking
 from netbox_branching.choices import BranchStatusChoices
 from netbox_branching.constants import COOKIE_NAME
 from netbox_branching.models import Branch, ChangeDiff
-from netbox_branching.utilities import BranchStatusChanged
+from netbox_branching.utilities import BranchHasUnmergedChanges, BranchStatusChanged
 from netbox_branching.tests.utils import FastTeardownTransactionTestCase
 from users.models import Token
 
@@ -174,7 +174,8 @@ class BranchArchiveAPITestCase(BaseAPITestCase, TestCase):
         url = reverse('plugins-api:netbox_branching-api:branch-archive', kwargs={'pk': branch.pk})
         response = self.client.post(url, **self.header)
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.content), {'detail': 'Only merged branches can be archived.'})
 
         branch.refresh_from_db()
         self.assertEqual(branch.status, 'ready')
@@ -188,7 +189,18 @@ class BranchArchiveAPITestCase(BaseAPITestCase, TestCase):
         with patch.object(Branch, 'archive', side_effect=BranchStatusChanged('status changed')):
             response = self.client.post(url, **self.header)
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
+
+    def test_archive_endpoint_unmerged_changes(self):
+        branch = Branch(name='Test Branch', status=BranchStatusChoices.MERGED)
+        branch.save(provision=False)
+
+        url = reverse('plugins-api:netbox_branching-api:branch-archive', kwargs={'pk': branch.pk})
+        with patch.object(Branch, 'archive', side_effect=BranchHasUnmergedChanges('has 1 change(s) made after')):
+            response = self.client.post(url, **self.header)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('made after', json.loads(response.content)['detail'])
 
     def test_patch_status_archived_blocked(self):
         branch = Branch(name='Test Branch', status=BranchStatusChoices.MERGED)
@@ -210,7 +222,7 @@ class BaseBranchAPITestCase(BaseAPITestCase):
     Base mixin for sync/merge/revert endpoint tests. Subclasses set:
       action        - URL action name (e.g. 'sync')
       valid_status  - branch status that allows the action
-      invalid_status - branch status that should return 400
+      invalid_status - branch status that should return 409
     """
 
     action = None
@@ -271,7 +283,8 @@ class BaseBranchAPITestCase(BaseAPITestCase):
         branch = self.make_branch(status=self.invalid_status)
         response = self.client.post(self.get_url(branch.pk), **self.header)
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('detail', json.loads(response.content))
 
         branch.refresh_from_db()
         self.assertEqual(branch.status, self.invalid_status)
