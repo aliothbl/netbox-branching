@@ -1,16 +1,16 @@
 # SPEC-20261114-1737: Transições de status do Branch com compare-and-set
 
-**Status:** draft
+**Status:** active
 **Porte:** M
 **Owner:** @aliothbl
 **Criada:** 2026-11-14 17:37
-**Ativada:** —
+**Ativada:** 2026-11-15 21:42
 **Pausada em:** —
 **Concluída:** —
 **Commit final:** —
 **Keywords:** status, compare-and-set, CAS, merge-duplo, sync-duplo, rqworker, transição, signal-handler, finally
 **Features:** sync-merge-revert
-**Branch:** _(a definir na ativação)_
+**Branch:** `spec/20261114-1737-cas-transicoes-status`
 **Programa:** —
 **Relacionadas:** SPEC-20261114-1738 (bloqueio de escritas; usa o mesmo ponto de transição); SPEC-20261114-1736 (cenário `branch-double-merge`)
 **Origem:** DIAGNOSTICO F1 e F14.

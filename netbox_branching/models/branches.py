@@ -399,6 +399,18 @@ class Branch(JobsMixin, PrimaryModel):
             )
         return ObjectChange.objects.none()
 
+    def _transition_status(self, expected, new, **fields):
+        """
+        Compare-and-set the branch's status: move it to `new` (writing `fields` along) only if it is
+        currently one of `expected`. Returns whether it did. Every lifecycle transition goes through
+        this, so that two jobs never operate the same branch at once (both passing an in-memory
+        "ready" check used to replay the change log twice) and a job's rollback never overwrites a
+        status another job set (F1).
+        """
+        if isinstance(expected, str):
+            expected = (expected,)
+        return Branch.objects.filter(pk=self.pk, status__in=expected).update(status=new, **fields) == 1
+
     def get_unmerged_changes(self):
         """
         Return a queryset of all unmerged ObjectChange records within the Branch schema.
@@ -944,7 +956,8 @@ class Branch(JobsMixin, PrimaryModel):
         # Switch the status first and wait for in-flight writes to the branch (the branch write lock),
         # as merge() does, so the sync never runs alongside a write request in the branch schema.
         logger.debug(f'Setting branch status to {BranchStatusChoices.SYNCING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.SYNCING)
+        if not self._transition_status(BranchStatusChoices.READY, BranchStatusChoices.SYNCING):
+            raise Exception(f'Branch {self} is not ready to sync (its status changed)')
         locked = False
         try:
             with branch_exclusive_lock(self, get_plugin_config('netbox_branching', 'write_drain_timeout')):
@@ -954,7 +967,7 @@ class Branch(JobsMixin, PrimaryModel):
             # The body restores the status itself; only a failure to get the lock is handled here.
             if not locked:
                 logger.error('Could not start sync: in-flight writes to the branch did not finish')
-                Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+                self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY)
             raise
 
     def _sync_locked(self, user, commit, logger):
@@ -968,7 +981,7 @@ class Branch(JobsMixin, PrimaryModel):
             logger.info(f'Found {len(changes)} changes to sync')
         else:
             logger.info('No changes found; aborting.')
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+            self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY)
             return
 
         # Generate a request ID for correlating ObjectChange records from this sync
@@ -1035,14 +1048,16 @@ class Branch(JobsMixin, PrimaryModel):
             if err_message := str(e):
                 logger.error(err_message)
             # Restore original branch status
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+            self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY)
             raise
 
         # Record the branch's last_synced time & update its status
         logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
+        if not self._transition_status(BranchStatusChoices.SYNCING, BranchStatusChoices.READY, last_sync=sync_started):
+            raise Exception(f'The status of branch {self} changed while it was being synced')
         self.last_sync = sync_started
         self.status = BranchStatusChoices.READY
-        self.save(update_merge_sync_fields=True)
+        self.save(update_fields=['last_sync'])
 
         # Record a branch event for the sync
         logger.debug(f'Recording branch event: {BranchEventTypeChoices.SYNCED}')
@@ -1082,7 +1097,10 @@ class Branch(JobsMixin, PrimaryModel):
 
         # Set Branch status
         logger.debug(f'Setting branch status to {BranchStatusChoices.MIGRATING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.MIGRATING)
+        if not self._transition_status(
+            (BranchStatusChoices.READY, BranchStatusChoices.PENDING_MIGRATIONS), BranchStatusChoices.MIGRATING
+        ):
+            raise Exception(f'Branch {self} cannot be migrated now (its status changed)')
 
         # Generate migration plan & apply any migrations
         connection = connections[self.connection_name]
@@ -1122,7 +1140,7 @@ class Branch(JobsMixin, PrimaryModel):
                     logger.error(err_message)
                 # Mark the branch as failed so it cannot be activated in a partially-migrated
                 # state. Migrations already applied have been persisted by the progress callback.
-                Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.FAILED)
+                self._transition_status(BranchStatusChoices.MIGRATING, BranchStatusChoices.FAILED)
                 self.status = BranchStatusChoices.FAILED
                 raise
         else:
@@ -1130,8 +1148,10 @@ class Branch(JobsMixin, PrimaryModel):
 
         # Reset Branch status to ready
         logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
+        if not self._transition_status(BranchStatusChoices.MIGRATING, BranchStatusChoices.READY):
+            raise Exception(f'The status of branch {self} changed while it was being migrated')
         self.status = BranchStatusChoices.READY
-        self.save(update_merge_sync_fields=True)
+        self.save(update_fields=['applied_migrations'])
 
         # Record a branch event for the migration
         logger.debug(f'Recording branch event: {BranchEventTypeChoices.MIGRATED}')
@@ -1165,7 +1185,8 @@ class Branch(JobsMixin, PrimaryModel):
         # Reading it first let a write committed in between stay in the branch schema, never merged
         # and dropped with the schema when the branch is archived (F2).
         logger.debug(f'Setting branch status to {BranchStatusChoices.MERGING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.MERGING)
+        if not self._transition_status(BranchStatusChoices.READY, BranchStatusChoices.MERGING):
+            raise Exception(f'Branch {self} is not ready to merge (its status changed)')
         locked = False
         try:
             with branch_exclusive_lock(self, get_plugin_config('netbox_branching', 'write_drain_timeout')):
@@ -1175,7 +1196,7 @@ class Branch(JobsMixin, PrimaryModel):
             # The body restores the status itself; only a failure to get the lock is handled here.
             if not locked:
                 logger.error('Could not start merge: in-flight writes to the branch did not finish')
-                Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+                self._transition_status(BranchStatusChoices.MERGING, BranchStatusChoices.READY)
             raise
 
     def _merge_locked(self, user, commit, logger):
@@ -1184,7 +1205,7 @@ class Branch(JobsMixin, PrimaryModel):
             logger.info(f'Found {len(changes)} changes to merge')
         else:
             logger.info('No changes found; aborting.')
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
+            self._transition_status(BranchStatusChoices.MERGING, BranchStatusChoices.READY)
             return
 
         # Create a dummy request for the event_tracking() context manager
@@ -1193,43 +1214,50 @@ class Branch(JobsMixin, PrimaryModel):
         # Prep & connect the signal receiver for recording AppliedChanges
         handler = partial(record_applied_change, branch=self)
         post_save.connect(handler, sender=ObjectChange_, weak=False)
-
+        # Disconnect the receiver whatever happens, including an exception after the commit
+        # (e.g. in a post_* signal handler), which used to leave it connected in the worker (F14).
         try:
-            with transaction.atomic():
-                # Get and execute the appropriate merge strategy
-                strategy_class = get_merge_strategy(self.merge_strategy)
-                logger.debug(f'Merging using {self.merge_strategy} strategy')
-                strategy_class().merge(self, changes, request, logger, user)
+            try:
+                with transaction.atomic():
+                    # Get and execute the appropriate merge strategy
+                    strategy_class = get_merge_strategy(self.merge_strategy)
+                    logger.debug(f'Merging using {self.merge_strategy} strategy')
+                    strategy_class().merge(self, changes, request, logger, user)
 
-                if not commit:
-                    raise AbortTransaction()
+                    if not commit:
+                        raise AbortTransaction()
 
-        except Exception as e:
-            if err_message := str(e):
-                logger.error(err_message)
-            # Disconnect signal receiver & restore original branch status
+            except Exception as e:
+                if err_message := str(e):
+                    logger.error(err_message)
+                # Disconnect signal receiver & restore original branch status
+                post_save.disconnect(handler, sender=ObjectChange_)
+                self._transition_status(BranchStatusChoices.MERGING, BranchStatusChoices.READY)
+                raise
+
+            # Update the Branch's status to "merged"
+            logger.debug(f'Setting branch status to {BranchStatusChoices.MERGED}')
+            merged_time = timezone.now()
+            if not self._transition_status(
+                BranchStatusChoices.MERGING, BranchStatusChoices.MERGED, merged_time=merged_time, merged_by=user
+            ):
+                raise Exception(f'The status of branch {self} changed while it was being merged')
+            self.status = BranchStatusChoices.MERGED
+            self.merged_time = merged_time
+            self.merged_by = user
+            self.save(update_fields=['merged_time', 'merged_by'])
+
+            # Record a branch event for the merge
+            logger.debug(f'Recording branch event: {BranchEventTypeChoices.MERGED}')
+            BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.MERGED)
+
+            # Emit post-merge signal
+            post_merge.send(sender=self.__class__, branch=self, user=user)
+
+            logger.info('Merging completed')
+
+        finally:
             post_save.disconnect(handler, sender=ObjectChange_)
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.READY)
-            raise
-
-        # Update the Branch's status to "merged"
-        logger.debug(f'Setting branch status to {BranchStatusChoices.MERGED}')
-        self.status = BranchStatusChoices.MERGED
-        self.merged_time = timezone.now()
-        self.merged_by = user
-        self.save(update_merge_sync_fields=True)
-
-        # Record a branch event for the merge
-        logger.debug(f'Recording branch event: {BranchEventTypeChoices.MERGED}')
-        BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.MERGED)
-
-        # Emit post-merge signal
-        post_merge.send(sender=self.__class__, branch=self, user=user)
-
-        logger.info('Merging completed')
-
-        # Disconnect the signal receiver
-        post_save.disconnect(handler, sender=ObjectChange_)
 
     merge.alters_data = True
     _merge_locked.alters_data = True
@@ -1262,7 +1290,8 @@ class Branch(JobsMixin, PrimaryModel):
 
         # Update Branch status
         logger.debug(f'Setting branch status to {BranchStatusChoices.REVERTING}')
-        Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.REVERTING)
+        if not self._transition_status(BranchStatusChoices.MERGED, BranchStatusChoices.REVERTING):
+            raise Exception(f'Branch {self} is not merged (its status changed)')
 
         # Create a dummy request for the event_tracking() context manager
         request = RequestFactory().get(reverse('home'))
@@ -1270,43 +1299,53 @@ class Branch(JobsMixin, PrimaryModel):
         # Prep & connect the signal receiver for recording AppliedChanges
         handler = partial(record_applied_change, branch=self)
         post_save.connect(handler, sender=ObjectChange_, weak=False)
-
+        # Disconnect the receiver whatever happens, including an exception after the commit
+        # (e.g. in a post_* signal handler), which used to leave it connected in the worker (F14).
         try:
-            with transaction.atomic():
-                # Execute the revert strategy
-                logger.debug(f'Reverting using {self.merge_strategy} strategy')
-                strategy_class().revert(self, changes, request, logger, user)
+            try:
+                with transaction.atomic():
+                    # Execute the revert strategy
+                    logger.debug(f'Reverting using {self.merge_strategy} strategy')
+                    strategy_class().revert(self, changes, request, logger, user)
 
-                if not commit:
-                    raise AbortTransaction()
+                    if not commit:
+                        raise AbortTransaction()
 
-        except Exception as e:
-            if err_message := str(e):
-                logger.error(err_message)
-            # Disconnect signal receiver & restore original branch status
+            except Exception as e:
+                if err_message := str(e):
+                    logger.error(err_message)
+                # Disconnect signal receiver & restore original branch status
+                post_save.disconnect(handler, sender=ObjectChange_)
+                self._transition_status(BranchStatusChoices.REVERTING, BranchStatusChoices.MERGED)
+                raise
+
+            # Update the Branch's status to "ready"
+            logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
+            if not self._transition_status(
+                BranchStatusChoices.REVERTING,
+                BranchStatusChoices.READY,
+                merged_time=None,
+                merged_by=None,
+                merge_strategy=None,
+            ):
+                raise Exception(f'The status of branch {self} changed while it was being reverted')
+            self.status = BranchStatusChoices.READY
+            self.merged_time = None
+            self.merged_by = None
+            self.merge_strategy = None
+            self.save(update_fields=['merged_time', 'merged_by', 'merge_strategy'])
+
+            # Record a branch event for the merge
+            logger.debug(f'Recording branch event: {BranchEventTypeChoices.REVERTED}')
+            BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.REVERTED)
+
+            # Emit post-revert signal
+            post_revert.send(sender=self.__class__, branch=self, user=user)
+
+            logger.info('Reversion completed')
+
+        finally:
             post_save.disconnect(handler, sender=ObjectChange_)
-            Branch.objects.filter(pk=self.pk).update(status=BranchStatusChoices.MERGED)
-            raise
-
-        # Update the Branch's status to "ready"
-        logger.debug(f'Setting branch status to {BranchStatusChoices.READY}')
-        self.status = BranchStatusChoices.READY
-        self.merged_time = None
-        self.merged_by = None
-        self.merge_strategy = None
-        self.save(update_merge_sync_fields=True)
-
-        # Record a branch event for the merge
-        logger.debug(f'Recording branch event: {BranchEventTypeChoices.REVERTED}')
-        BranchEvent.objects.create(branch=self, user=user, type=BranchEventTypeChoices.REVERTED)
-
-        # Emit post-revert signal
-        post_revert.send(sender=self.__class__, branch=self, user=user)
-
-        logger.info('Reversion completed')
-
-        # Disconnect the signal receiver
-        post_save.disconnect(handler, sender=ObjectChange_)
 
     revert.alters_data = True
 
